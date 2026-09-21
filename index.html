@@ -121,6 +121,9 @@
 
     <!-- ─── COMIDA ─── -->
     <section id="sec-comida" class="section">
+      <!-- Mis preferencias -->
+      <button id="comida-defaults-btn" class="defaults-btn">⚙️ Mis preferencias de asistencia</button>
+
       <!-- Week navigation -->
       <div class="week-nav">
         <button class="week-nav-btn" id="comida-prev" aria-label="Semana anterior">‹</button>
@@ -266,6 +269,24 @@
         ⚠️ Hay solapamiento con otra reserva de este coche
       </div>
 
+      <div id="reserva-recurrente-row" class="form-group">
+        <label class="form-label">Repetición</label>
+        <label class="toggle-label">
+          <input type="checkbox" id="reserva-recurrente" />
+          <span>Repetir cada semana</span>
+        </label>
+      </div>
+      <div class="form-group hidden" id="reserva-semanas-group">
+        <label class="form-label" for="reserva-semanas">Durante cuántas semanas</label>
+        <select id="reserva-semanas" class="form-select">
+          <option value="4">4 semanas</option>
+          <option value="8">8 semanas</option>
+          <option value="12">12 semanas</option>
+          <option value="26">6 meses (26 semanas)</option>
+          <option value="52">1 año (52 semanas)</option>
+        </select>
+      </div>
+
       <div class="form-actions">
         <button type="button" class="btn btn-ghost" id="sheet-cancel-btn">Cancelar</button>
         <button type="submit" class="btn btn-primary">Guardar</button>
@@ -302,6 +323,17 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label" for="evento-recurrencia">Repetición</label>
+          <select id="evento-recurrencia" class="form-select">
+            <option value="">Sin repetición</option>
+            <option value="daily">Diaria</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensual</option>
+            <option value="yearly">Anual</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">¿Quién va?</label>
           <div class="persona-chips" id="evento-personas-chips">
             <!-- populated by JS -->
@@ -320,6 +352,21 @@
        FAB: Añadir evento
   ═══════════════════════════════════════ -->
   <button id="add-evento-fab" class="fab" aria-label="Añadir evento">+</button>
+
+  <!-- ═══════════════════════════════════════
+       BOTTOM SHEET: Preferencias de comida
+  ═══════════════════════════════════════ -->
+  <div id="defaults-sheet-overlay" class="sheet-overlay"></div>
+  <div id="defaults-sheet" class="bottom-sheet" role="dialog" aria-modal="true" aria-label="Mis preferencias de asistencia">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Mis días habituales</h3>
+    <p class="sheet-subtitle">Marca los días que sueles comer en casa por defecto</p>
+    <div id="defaults-grid" class="defaults-grid"></div>
+    <div class="form-actions" style="margin-top:1rem">
+      <button class="btn btn-ghost" id="defaults-cancel-btn">Cancelar</button>
+      <button class="btn btn-primary" id="defaults-save-btn">Guardar</button>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════
        TOAST de notificación

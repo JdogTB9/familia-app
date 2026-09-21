@@ -42,6 +42,19 @@ const SECTION_TITLES = { home: "Inicio", comida: "Comida", coche: "Coche 🚗", 
 
 const EVENTO_COLORS = ["#e07b39","#5d8a5e","#2c4a6e","#9b59b6","#c0392b","#16a085","#f39c12"];
 
+const COLORES_FAMILIA = {
+  "Papá":   { bg: "#e74c3c", text: "#fff" },
+  "Mamá":   { bg: "#e91e8c", text: "#fff" },
+  "Manuel": { bg: "#f1c40f", text: "#2d2d2d" },
+  "Javier": { bg: "#e07b39", text: "#fff" },
+  "Lucía":  { bg: "#27ae60", text: "#fff" },
+  "Ana":    { bg: "#3ab7f5", text: "#fff" }
+};
+
+function getUserColor(nombre) {
+  return COLORES_FAMILIA[nombre] || { bg: "var(--color-primary)", text: "#fff" };
+}
+
 /* ═══════════════════════════════════════
    ESTADO GLOBAL
 ═══════════════════════════════════════ */
@@ -69,6 +82,9 @@ let eventoPersonas  = {};
 
 // Datos en memoria del coche (para solapamiento)
 let cocheWeekData = {};
+
+// Defaults de comida por persona
+let comidaDefaults = {};
 
 // Eventos — estado semanal
 let eventoWeekOffset = 0;
@@ -155,14 +171,26 @@ function initUI() {
   // User grid
   const grid = document.getElementById("user-grid");
   FAMILIA.forEach(nombre => {
+    const col = getUserColor(nombre);
     const btn = document.createElement("button");
     btn.className = "user-btn";
     btn.innerHTML = `
-      <div class="user-btn-avatar">${nombre[0]}</div>
+      <div class="user-btn-avatar" style="background:${col.bg};color:${col.text}">${nombre[0]}</div>
       <span>${nombre}</span>
     `;
     btn.addEventListener("click", () => selectUser(nombre));
     grid.appendChild(btn);
+  });
+
+  // Comida defaults sheet
+  document.getElementById("comida-defaults-btn").addEventListener("click", openDefaultsSheet);
+  document.getElementById("defaults-cancel-btn").addEventListener("click", closeDefaultsSheet);
+  document.getElementById("defaults-sheet-overlay").addEventListener("click", closeDefaultsSheet);
+  document.getElementById("defaults-save-btn").addEventListener("click", saveComidaDefaults);
+
+  // Recurrencia reserva
+  document.getElementById("reserva-recurrente").addEventListener("change", (e) => {
+    document.getElementById("reserva-semanas-group").classList.toggle("hidden", !e.target.checked);
   });
 
   // Persona selects en form de reserva
@@ -198,6 +226,8 @@ function checkUser() {
     hideUserModal();
     updateUserUI();
     navigateTo("home");
+    initNotificationListener();
+    requestNotificationPermission();
   }
 }
 
@@ -206,16 +236,27 @@ function selectUser(nombre) {
   hideUserModal();
   updateUserUI();
   navigateTo("home");
+  initNotificationListener();
+  requestNotificationPermission();
 }
 
 function updateUserUI() {
   const nombre = getUser() || "?";
   const inicial = nombre[0];
-  document.getElementById("header-user-badge").textContent = inicial;
-  document.getElementById("header-user-badge").title = nombre;
-  document.getElementById("drawer-user-avatar").textContent = inicial;
+  const col = getUserColor(nombre);
+
+  const badge = document.getElementById("header-user-badge");
+  badge.textContent = inicial;
+  badge.title = nombre;
+  badge.style.background = col.bg;
+  badge.style.color = col.text;
+
+  const avatar = document.getElementById("drawer-user-avatar");
+  avatar.textContent = inicial;
+  avatar.style.background = col.bg;
+  avatar.style.color = col.text;
+
   document.getElementById("drawer-user-name").textContent = nombre;
-  // Pre-select in reserva form
   const sel = document.getElementById("reserva-persona");
   sel.value = nombre;
 }
@@ -299,9 +340,11 @@ function renderActivityFeed(containerEl, items) {
     containerEl.innerHTML = '<li class="activity-empty">Sin cambios recientes</li>';
     return;
   }
-  containerEl.innerHTML = items.map(item => `
+  containerEl.innerHTML = items.map(item => {
+    const col = getUserColor(item.persona || "");
+    return `
     <li class="activity-item">
-      <div class="activity-avatar">${item.persona?.[0] || "?"}</div>
+      <div class="activity-avatar" style="background:${col.bg};color:${col.text}">${item.persona?.[0] || "?"}</div>
       <div class="activity-body">
         <div class="activity-text">
           ${sectionBadgeHTML(item.seccion)}
@@ -309,8 +352,8 @@ function renderActivityFeed(containerEl, items) {
         </div>
         <div class="activity-meta">${relativeTime(item.timestamp)}</div>
       </div>
-    </li>
-  `).join("");
+    </li>`;
+  }).join("");
 }
 
 function listenActivityFeed(containerEl, seccion = null, limit = 20) {
@@ -365,6 +408,15 @@ function formatDate(date) {
   return date.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
 }
 
+function toLocalDateStr(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatFechaCorta(fechaStr) {
+  const [y, m, d] = fechaStr.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 function formatWeekLabel(monday) {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
@@ -392,6 +444,21 @@ function detachListener(ref, off) {
   if (ref && off) ref.off("value", off);
 }
 
+// Dado "YYYY-MM-DD", devuelve la clave de día (lunes…domingo) correspondiente
+function fechaToDayKey(fecha) {
+  const d = new Date(fecha + "T00:00:00");
+  return DIAS_KEY[(d.getDay() + 6) % 7];
+}
+
+// Dado "YYYY-MM-DD", calcula cuántas semanas (offset) dista de la semana actual
+function fechaToWeekOffset(fecha) {
+  const eventMonday = new Date(fecha + "T00:00:00");
+  const idx = (eventMonday.getDay() + 6) % 7;
+  eventMonday.setDate(eventMonday.getDate() - idx); // retrocede al lunes de esa semana
+  const currentMonday = getMondayOfWeek(0);
+  return Math.round((eventMonday.getTime() - currentMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+}
+
 /* ═══════════════════════════════════════
    COMIDA SECTION
 ═══════════════════════════════════════ */
@@ -401,6 +468,12 @@ let comidaWeekDataCache = {};
 function initComida() {
   if (!db) return;
   comidaSelectedDia = getTodayDayKey();
+  db.ref("defaults/comida").on("value", snap => {
+    comidaDefaults = snap.val() || {};
+    if (currentSection === "comida") {
+      renderComidaDayContent(comidaSelectedDia, getISOWeekKey(getMondayOfWeek(comidaWeekOffset)));
+    }
+  });
   loadComidaWeek();
   detachListener(activeComidaFeedRef, activeComidaFeedOff);
   const feed = document.getElementById("comida-feed");
@@ -487,7 +560,7 @@ function renderComidaDayContent(dayKey, weekKey) {
     renderPlatos(dayKey, weekKey, tipo, mealData.platos || {});
     renderPersonaChips(`personas-${tipo}`, mealData.personas || {}, (persona, selected) => {
       handlePersonaToggleComida(weekKey, dayKey, tipo, persona, selected);
-    });
+    }, (persona) => !!(comidaDefaults[persona]?.[dayKey]?.[tipo]));
     document.getElementById(`add-plato-${tipo}`).addEventListener("click", () => {
       addPlatoInput(dayKey, weekKey, tipo);
     });
@@ -597,32 +670,104 @@ function addPlatoInput(dayKey, weekKey, tipo) {
 function savePlato(weekKey, dayKey, tipo, idx, valor) {
   if (!db) return;
   db.ref(`comida/${weekKey}/${dayKey}/${tipo}/platos/${idx}`).set(valor);
-  logActivity("Comida", `ha modificado el ${tipo} del ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}: "${valor}"`);
+  logActivity("Comida", `ha modificado la ${tipo} del ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}: "${valor}"`);
 }
 
 function deletePlato(weekKey, dayKey, tipo, idx) {
   if (!db) return;
   db.ref(`comida/${weekKey}/${dayKey}/${tipo}/platos/${idx}`).remove();
-  logActivity("Comida", `ha eliminado un plato del ${tipo} del ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}`);
+  logActivity("Comida", `ha eliminado un plato de la ${tipo} del ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}`);
 }
 
 function handlePersonaToggleComida(weekKey, dayKey, tipo, persona, selected) {
   if (!db) return;
-  const val = selected ? true : null;
+  const val = selected ? true : false;
   db.ref(`comida/${weekKey}/${dayKey}/${tipo}/personas/${persona}`).set(val);
-  const accion = selected ? "se ha apuntado a" : "se ha quitado de";
-  logActivity("Comida", `${accion} la ${tipo} del ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}`);
+  const diaLabel = DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey;
+  if (persona === getUser()) {
+    const accion = selected ? "se ha apuntado a" : "se ha quitado de";
+    logActivity("Comida", `${accion} la ${tipo} del ${diaLabel}`);
+  } else {
+    const accion = selected ? "ha apuntado a" : "ha quitado a";
+    logActivity("Comida", `${accion} ${persona} de la ${tipo} del ${diaLabel}`);
+  }
+}
+
+/* DEFAULTS SHEET */
+function openDefaultsSheet() {
+  const persona = getUser();
+  if (!persona) return;
+  const grid = document.getElementById("defaults-grid");
+  grid.innerHTML = "";
+
+  // Header
+  ["", "Comida", "Cena"].forEach(label => {
+    const h = document.createElement("div");
+    h.className = "defaults-grid-header";
+    h.textContent = label;
+    grid.appendChild(h);
+  });
+
+  DIAS_KEY.forEach((dayKey, i) => {
+    const dayDef = (comidaDefaults[persona] || {})[dayKey] || {};
+
+    const label = document.createElement("div");
+    label.className = "defaults-grid-label";
+    label.textContent = DIAS_FULL[i];
+    grid.appendChild(label);
+
+    ["comida", "cena"].forEach(tipo => {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      const isActive = !!dayDef[tipo];
+      toggle.className = "defaults-toggle" + (isActive ? " active" : "");
+      toggle.dataset.day = dayKey;
+      toggle.dataset.tipo = tipo;
+      toggle.textContent = isActive ? "✓" : "–";
+      toggle.addEventListener("click", () => {
+        toggle.classList.toggle("active");
+        toggle.textContent = toggle.classList.contains("active") ? "✓" : "–";
+      });
+      grid.appendChild(toggle);
+    });
+  });
+
+  document.getElementById("defaults-sheet").classList.add("open");
+  document.getElementById("defaults-sheet-overlay").classList.add("open");
+}
+
+function closeDefaultsSheet() {
+  document.getElementById("defaults-sheet").classList.remove("open");
+  document.getElementById("defaults-sheet-overlay").classList.remove("open");
+}
+
+function saveComidaDefaults() {
+  const persona = getUser();
+  if (!persona || !db) return;
+  const newDefaults = {};
+  document.querySelectorAll("#defaults-grid .defaults-toggle").forEach(toggle => {
+    const day  = toggle.dataset.day;
+    const tipo = toggle.dataset.tipo;
+    if (!newDefaults[day]) newDefaults[day] = {};
+    newDefaults[day][tipo] = toggle.classList.contains("active");
+  });
+  db.ref(`defaults/comida/${persona}`).set(newDefaults);
+  closeDefaultsSheet();
+  showToast("✓ Preferencias guardadas");
 }
 
 /* ═══════════════════════════════════════
    PERSONA CHIPS (reutilizable)
 ═══════════════════════════════════════ */
-function renderPersonaChips(containerId, personasData, onToggle) {
+function renderPersonaChips(containerId, personasData, onToggle, getDefaultFn = null) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = "";
   FAMILIA.forEach(persona => {
-    const selected = !!(personasData && personasData[persona]);
+    const explicit = personasData ? personasData[persona] : undefined;
+    const selected = (explicit !== undefined && explicit !== null)
+      ? !!explicit
+      : (getDefaultFn ? getDefaultFn(persona) : false);
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip" + (selected ? " selected" : "");
@@ -739,11 +884,10 @@ function renderCocheDayContent(dayKey, weekKey) {
 }
 
 function carReservaHTML(rId, r, cocheId, dayKey, weekKey) {
-  const coche = COCHES[cocheId];
   return `
     <div class="car-reserva-item">
       <span class="car-reserva-time">${r.horaInicio} – ${r.horaFin}</span>
-      <span class="car-reserva-persona">${escapeHTML(r.persona)}</span>
+      <span class="car-reserva-persona">${escapeHTML(r.persona)}${r.recurrente ? " 🔁" : ""}</span>
       <div class="car-reserva-actions">
         <button class="car-reserva-action" data-edit="${rId}" aria-label="Editar">✏️</button>
         <button class="car-reserva-action delete" data-del="${rId}" aria-label="Eliminar">🗑️</button>
@@ -770,6 +914,9 @@ function openReservaSheet(cocheId, dayKey, weekKey, rId = null, reservaData = nu
   document.getElementById("reserva-inicio").value   = reservaData?.horaInicio || "";
   document.getElementById("reserva-fin").value      = reservaData?.horaFin    || "";
   document.getElementById("reserva-overlap-warning").classList.add("hidden");
+  document.getElementById("reserva-recurrente").checked = false;
+  document.getElementById("reserva-semanas-group").classList.add("hidden");
+  document.getElementById("reserva-recurrente-row").classList.toggle("hidden", !!rId);
 
   document.getElementById("reserva-sheet").classList.add("open");
   document.getElementById("sheet-overlay").classList.add("open");
@@ -806,15 +953,24 @@ function handleReservaSubmit(e) {
     document.getElementById("reserva-overlap-warning").classList.remove("hidden");
   }
 
+  const esRecurrente = !editingReservaId && document.getElementById("reserva-recurrente").checked;
+  const numSemanas   = esRecurrente ? parseInt(document.getElementById("reserva-semanas").value, 10) : 1;
   const data = { persona, coche: editingReservaCoche, horaInicio, horaFin, timestamp: Date.now() };
+  if (esRecurrente) data.recurrente = true;
   const coche = COCHES[editingReservaCoche];
 
+  const diaLabelCoche = DIAS_FULL[DIAS_KEY.indexOf(editingReservaDia)] || editingReservaDia;
+  const paraQuien = persona !== getUser() ? ` para ${persona}` : "";
   if (editingReservaId) {
     db.ref(`coche/${editingReservaSemana}/${editingReservaDia}/reservas/${editingReservaId}`).update(data);
-    logActivity("Coche", `ha modificado su reserva del ${coche.nombre} el ${DIAS_FULL[DIAS_KEY.indexOf(editingReservaDia)] || editingReservaDia} (${horaInicio}–${horaFin})`);
+    logActivity("Coche", `ha modificado su reserva del ${coche.nombre}${paraQuien} el ${diaLabelCoche} (${horaInicio}–${horaFin})`);
   } else {
-    db.ref(`coche/${editingReservaSemana}/${editingReservaDia}/reservas`).push(data);
-    logActivity("Coche", `ha reservado el ${coche.nombre} el ${DIAS_FULL[DIAS_KEY.indexOf(editingReservaDia)] || editingReservaDia} (${horaInicio}–${horaFin})`);
+    for (let i = 0; i < numSemanas; i++) {
+      const semKey = getISOWeekKey(getMondayOfWeek(cocheWeekOffset + i));
+      db.ref(`coche/${semKey}/${editingReservaDia}/reservas`).push(data);
+    }
+    const label = numSemanas > 1 ? ` 🔁 ${numSemanas} semanas` : "";
+    logActivity("Coche", `ha reservado el ${coche.nombre}${paraQuien} el ${diaLabelCoche} (${horaInicio}–${horaFin})${label}`);
   }
 
   closeReservaSheet();
@@ -830,6 +986,39 @@ function deleteReserva(weekKey, dayKey, rId, nombreCoche) {
 }
 
 /* ═══════════════════════════════════════
+   RECURRENCIA HELPERS
+═══════════════════════════════════════ */
+function generarInstancias(evento, horizonte = 730) {
+  if (!evento.recurrencia) return [evento];
+  const instancias = [];
+  const base = new Date(evento.fecha + "T00:00:00");
+  const hasta = new Date();
+  hasta.setDate(hasta.getDate() + horizonte);
+  let cur = new Date(base);
+  while (cur <= hasta) {
+    instancias.push({
+      ...evento,
+      fecha: toLocalDateStr(cur),
+      esVirtual: cur.getTime() !== base.getTime()
+    });
+    switch (evento.recurrencia) {
+      case "daily":   cur.setDate(cur.getDate() + 1); break;
+      case "weekly":  cur.setDate(cur.getDate() + 7); break;
+      case "monthly": cur.setMonth(cur.getMonth() + 1); break;
+      case "yearly":  cur.setFullYear(cur.getFullYear() + 1); break;
+      default:        cur = new Date(hasta.getTime() + 1);
+    }
+  }
+  return instancias;
+}
+
+function getEventosExpanded(horizonte = 730) {
+  const result = [];
+  allEventosCache.forEach(e => result.push(...generarInstancias(e, horizonte)));
+  return result;
+}
+
+/* ═══════════════════════════════════════
    EVENTOS SECTION
 ═══════════════════════════════════════ */
 function initEventos() {
@@ -839,11 +1028,15 @@ function initEventos() {
   loadEventosWeek();
 
   detachListener(activeEventosRef, activeEventosOff);
-  const ref = db.ref("eventos").orderByChild("fecha");
+  const ref = db.ref("eventos");
   const off = ref.on("value", snap => {
     const eventos = [];
     snap.forEach(child => eventos.push({ id: child.key, ...child.val() }));
+    eventos.sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
     renderEventos(eventos);
+  }, err => {
+    console.error("[eventos] lectura denegada:", err);
+    showToast("⚠️ No se pueden leer los eventos — revisa las reglas de Firebase");
   });
   activeEventosRef = ref;
   activeEventosOff = off;
@@ -869,8 +1062,8 @@ function renderEventosDayTabs(monday) {
     const dayDate = new Date(monday);
     dayDate.setDate(monday.getDate() + i);
     const dayKey  = DIAS_KEY[i];
-    const dayISO  = dayDate.toISOString().split("T")[0];
-    const hasEvento = allEventosCache.some(e => e.fecha === dayISO);
+    const dayISO  = toLocalDateStr(dayDate);
+    const hasEvento = getEventosExpanded().some(e => e.fecha === dayISO);
 
     const btn = document.createElement("button");
     btn.className = "day-tab" +
@@ -900,10 +1093,10 @@ function renderEventosDayContent(dayKey, monday) {
   const dayIdx  = DIAS_KEY.indexOf(dayKey);
   const dayDate = new Date(monday);
   dayDate.setDate(monday.getDate() + (dayIdx >= 0 ? dayIdx : 0));
-  const dayISO  = dayDate.toISOString().split("T")[0];
+  const dayISO  = toLocalDateStr(dayDate);
   const dayLabel = DIAS_FULL[dayIdx >= 0 ? dayIdx : 0];
 
-  const eventosDelDia = allEventosCache
+  const eventosDelDia = getEventosExpanded()
     .filter(e => e.fecha === dayISO)
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -939,7 +1132,7 @@ function renderEventosDayContent(dayKey, monday) {
         <div class="evento-card-body">
           <div class="evento-card-top">
             <div>
-              <div class="evento-card-nombre">${escapeHTML(evento.nombre)}</div>
+              <div class="evento-card-nombre">${escapeHTML(evento.nombre)}${evento.esVirtual ? ' <span class="recurrence-badge">🔁</span>' : ''}</div>
               ${evento.descripcion ? `<div class="evento-card-desc">${escapeHTML(evento.descripcion)}</div>` : ""}
             </div>
             <div class="evento-card-actions">
@@ -972,24 +1165,23 @@ function renderEventos(eventos) {
   renderEventosDayTabs(monday);
   renderEventosDayContent(eventoSelectedDia, monday);
 
-  // Lista de próximos eventos
+  // Lista de próximos eventos: solo los 30 días siguientes
   const container = document.getElementById("eventos-list");
-  const today     = new Date().toISOString().split("T")[0];
-  const proximos  = eventos
-    .filter(e => e.fecha >= today)
+  const today     = toLocalDateStr(new Date());
+  const limit     = new Date(); limit.setDate(limit.getDate() + 30);
+  const maxDate   = toLocalDateStr(limit);
+  const expanded  = getEventosExpanded(30);
+  const proximos  = expanded
+    .filter(e => e.fecha >= today && e.fecha <= maxDate)
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
-  const pasados   = eventos
-    .filter(e => e.fecha < today)
-    .sort((a, b) => b.fecha.localeCompare(a.fecha));
 
-  const all = [...proximos, ...pasados];
-  if (all.length === 0) {
-    container.innerHTML = '<div class="eventos-empty">No hay eventos. ¡Añade el primero!</div>';
+  if (proximos.length === 0) {
+    container.innerHTML = '<div class="eventos-empty">No hay eventos en los próximos 30 días</div>';
     return;
   }
 
   container.innerHTML = "";
-  all.forEach((evento, i) => {
+  proximos.forEach((evento, i) => {
     const colorIdx = i % EVENTO_COLORS.length;
     const card = document.createElement("div");
     card.className = "evento-card";
@@ -998,7 +1190,7 @@ function renderEventos(eventos) {
       <div class="evento-card-body">
         <div class="evento-card-top">
           <div>
-            <div class="evento-card-nombre">${escapeHTML(evento.nombre)}</div>
+            <div class="evento-card-nombre">${escapeHTML(evento.nombre)}${evento.esVirtual || evento.recurrencia ? ' <span class="recurrence-badge">🔁</span>' : ''}</div>
             <div class="evento-card-fecha">${formatEventoFecha(evento.fecha)}</div>
           </div>
           <div class="evento-card-actions">
@@ -1044,8 +1236,13 @@ function renderEventoPersonaChips(containerId, personasData, eventoId) {
 function handleEventoPersonaToggle(eventoId, persona, selected) {
   if (!db) return;
   db.ref(`eventos/${eventoId}/personas/${persona}`).set(selected ? true : null);
-  const accion = selected ? "se ha apuntado a" : "se ha quitado de";
-  logActivity("Eventos", `${accion} un evento`);
+  if (persona === getUser()) {
+    const accion = selected ? "se ha apuntado a" : "se ha quitado de";
+    logActivity("Eventos", `${accion} un evento`);
+  } else {
+    const accion = selected ? "ha apuntado a" : "ha quitado a";
+    logActivity("Eventos", `${accion} ${persona} de un evento`);
+  }
 }
 
 function formatEventoFecha(fechaStr) {
@@ -1065,9 +1262,10 @@ function openEventoModal(eventoOrFecha = null) {
   eventoPersonas  = evento ? { ...(evento.personas || {}) } : {};
 
   document.getElementById("evento-modal-title").textContent = evento ? "Editar evento" : "Añadir evento";
-  document.getElementById("evento-nombre").value = evento?.nombre || "";
-  document.getElementById("evento-fecha").value  = evento?.fecha || fechaPre || new Date().toISOString().split("T")[0];
-  document.getElementById("evento-desc").value   = evento?.descripcion || "";
+  document.getElementById("evento-nombre").value     = evento?.nombre || "";
+  document.getElementById("evento-fecha").value      = evento?.fecha || fechaPre || toLocalDateStr(new Date());
+  document.getElementById("evento-desc").value       = evento?.descripcion || "";
+  document.getElementById("evento-recurrencia").value = evento?.recurrencia || "";
 
   // Persona chips en modal
   const chips = document.getElementById("evento-personas-chips");
@@ -1112,23 +1310,43 @@ function handleEventoSubmit(e) {
   const personas = {};
   Object.entries(eventoPersonas).forEach(([k, v]) => { if (v) personas[k] = true; });
 
+  const recurrencia = document.getElementById("evento-recurrencia").value || null;
   const data = {
     nombre,
     fecha,
     descripcion: desc || null,
+    recurrencia,
     personas,
     creadoPor: getUser() || "Alguien",
     timestamp: Date.now()
   };
 
   if (editingEventoId) {
-    db.ref(`eventos/${editingEventoId}`).update(data);
-    logActivity("Eventos", `ha modificado el evento "${nombre}"`);
-    showToast("✓ Evento actualizado");
+    db.ref(`eventos/${editingEventoId}`).update(data)
+      .then(() => {
+        logActivity("Eventos", `ha modificado el evento "${nombre}"`);
+        showToast("✓ Evento actualizado");
+      })
+      .catch(err => {
+        console.error("[eventos] guardado denegado:", err);
+        showToast("⚠️ No se pudo guardar el evento — revisa las reglas de Firebase");
+      });
   } else {
-    db.ref("eventos").push(data);
-    logActivity("Eventos", `ha añadido el evento "${nombre}" (${fecha})`);
-    showToast("✓ Evento añadido");
+    db.ref("eventos").push(data)
+      .then(() => {
+        logActivity("Eventos", `ha añadido el evento "${nombre}" (${formatFechaCorta(fecha)})`);
+        showToast("✓ Evento añadido");
+        // Navegar al día del evento; Firebase actualizará renderEventosDayContent con datos frescos
+        eventoWeekOffset = fechaToWeekOffset(fecha);
+        eventoSelectedDia = fechaToDayKey(fecha);
+        const newMonday = getMondayOfWeek(eventoWeekOffset);
+        document.getElementById("eventos-week-label").textContent = formatWeekLabel(newMonday);
+        renderEventosDayTabs(newMonday);
+      })
+      .catch(err => {
+        console.error("[eventos] guardado denegado:", err);
+        showToast("⚠️ No se pudo guardar el evento — revisa las reglas de Firebase");
+      });
   }
 
   closeEventoModal();
@@ -1152,6 +1370,36 @@ function showToast(msg, duration = 2800) {
   toast.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("show"), duration);
+}
+
+/* ═══════════════════════════════════════
+   NOTIFICACIONES
+═══════════════════════════════════════ */
+let notifListenerActive = false;
+
+function requestNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default") return;
+  setTimeout(() => Notification.requestPermission(), 2500);
+}
+
+function initNotificationListener() {
+  if (!db || notifListenerActive) return;
+  notifListenerActive = true;
+  const initTs = Date.now();
+  db.ref("actividad").limitToLast(1).on("value", snap => {
+    snap.forEach(child => {
+      const v = child.val();
+      if (v.timestamp > initTs && v.persona !== getUser() && Notification.permission === "granted") {
+        try {
+          new Notification(`${v.persona} — ${v.seccion}`, {
+            body: v.descripcion,
+            icon: "/icono_familia.jpeg",
+            tag:  "familia-activity"
+          });
+        } catch (e) {}
+      }
+    });
+  });
 }
 
 /* ═══════════════════════════════════════

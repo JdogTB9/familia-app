@@ -15,6 +15,25 @@ self.addEventListener("activate", e => {
   self.clients.claim();
 });
 
+// Notificaciones push (Web Push API nativa, sin FCM)
+self.addEventListener("push", e => {
+  if (!e.data) return;
+  const data = e.data.json();
+  e.waitUntil(
+    self.registration.showNotification(data.title || "Familia", {
+      body:  data.body  || "",
+      icon:  "/icono_familia.jpeg",
+      badge: "/icono_familia.jpeg",
+      tag:   "familia-activity"
+    })
+  );
+});
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.openWindow("/"));
+});
+
 self.addEventListener("fetch", e => {
   // Solo cachear requests GET de la misma origen; dejar pasar Firebase
   const url = new URL(e.request.url);
