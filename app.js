@@ -1018,6 +1018,24 @@ function getEventosExpanded(horizonte = 730) {
   return result;
 }
 
+// Lectura puntual (once) para refrescar la vista sin depender del listener en tiempo real
+function refreshEventos() {
+  if (!db) return;
+  db.ref("eventos").once("value").then(snap => {
+    // En redes con proxy la lectura del nodo entero a veces llega incompleta.
+    // Unimos con la caché actual (por id): nunca quitamos eventos por una lectura
+    // parcial, solo añadimos/actualizamos. Los borrados se gestionan de forma optimista.
+    const byId = {};
+    allEventosCache.forEach(e => { if (e && e.id) byId[e.id] = e; });
+    snap.forEach(child => { byId[child.key] = { id: child.key, ...child.val() }; });
+    allEventosCache = Object.values(byId);
+    renderEventos(allEventosCache);
+  }).catch(err => {
+    console.error("[eventos] refresh:", err);
+    showToast("⚠️ No se pudieron cargar los eventos — revisa las reglas de Firebase");
+  });
+}
+
 /* ═══════════════════════════════════════
    EVENTOS SECTION
 ═══════════════════════════════════════ */
@@ -1027,19 +1045,19 @@ function initEventos() {
   eventoSelectedDia = getTodayDayKey();
   loadEventosWeek();
 
+  // Sin listener on() persistente: la sincronización en vivo del nodo /eventos no es
+  // fiable en este entorno y además pisaba las actualizaciones optimistas (borraba de la
+  // vista eventos ya creados). Cargamos con once() (lectura fresca del servidor) y
+  // mantenemos la vista al día de forma optimista al crear/editar/borrar.
   detachListener(activeEventosRef, activeEventosOff);
-  const ref = db.ref("eventos");
-  const off = ref.on("value", snap => {
-    const eventos = [];
-    snap.forEach(child => eventos.push({ id: child.key, ...child.val() }));
-    eventos.sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
-    renderEventos(eventos);
-  }, err => {
-    console.error("[eventos] lectura denegada:", err);
-    showToast("⚠️ No se pueden leer los eventos — revisa las reglas de Firebase");
-  });
-  activeEventosRef = ref;
-  activeEventosOff = off;
+  activeEventosRef = null;
+  activeEventosOff = null;
+
+  // Carga con reintentos: en redes que entregan la lectura a trozos, cada relectura
+  // une los eventos que falten (refreshEventos hace unión, nunca quita).
+  refreshEventos();
+  setTimeout(() => { if (currentSection === "eventos") refreshEventos(); }, 1500);
+  setTimeout(() => { if (currentSection === "eventos") refreshEventos(); }, 4000);
 
   detachListener(activeEventosFeedRef, activeEventosFeedOff);
   const feed = document.getElementById("eventos-feed");
@@ -1322,26 +1340,34 @@ function handleEventoSubmit(e) {
   };
 
   if (editingEventoId) {
-    db.ref(`eventos/${editingEventoId}`).update(data)
+    const idEditado = editingEventoId;
+    db.ref(`eventos/${idEditado}`).update(data)
       .then(() => {
         logActivity("Eventos", `ha modificado el evento "${nombre}"`);
         showToast("✓ Evento actualizado");
+        // Actualización optimista: reflejar el cambio en la caché y repintar
+        allEventosCache = allEventosCache.map(e => e.id === idEditado ? { id: idEditado, ...data } : e);
+        eventoWeekOffset = fechaToWeekOffset(fecha);
+        eventoSelectedDia = fechaToDayKey(fecha);
+        renderEventos(allEventosCache);
       })
       .catch(err => {
         console.error("[eventos] guardado denegado:", err);
         showToast("⚠️ No se pudo guardar el evento — revisa las reglas de Firebase");
       });
   } else {
-    db.ref("eventos").push(data)
+    const nuevoRef = db.ref("eventos").push(data);
+    nuevoRef
       .then(() => {
         logActivity("Eventos", `ha añadido el evento "${nombre}" (${formatFechaCorta(fecha)})`);
         showToast("✓ Evento añadido");
-        // Navegar al día del evento; Firebase actualizará renderEventosDayContent con datos frescos
         eventoWeekOffset = fechaToWeekOffset(fecha);
         eventoSelectedDia = fechaToDayKey(fecha);
-        const newMonday = getMondayOfWeek(eventoWeekOffset);
-        document.getElementById("eventos-week-label").textContent = formatWeekLabel(newMonday);
-        renderEventosDayTabs(newMonday);
+        // Actualización optimista: meter el evento recién creado en la caché y repintar
+        // (no dependemos del listener en vivo, que puede no sincronizar)
+        allEventosCache = allEventosCache.filter(e => e.id !== nuevoRef.key);
+        allEventosCache.push({ id: nuevoRef.key, ...data });
+        renderEventos(allEventosCache);
       })
       .catch(err => {
         console.error("[eventos] guardado denegado:", err);
@@ -1355,9 +1381,18 @@ function handleEventoSubmit(e) {
 function deleteEvento(eventoId, nombre) {
   if (!db) return;
   if (!confirm(`¿Eliminar el evento "${nombre}"?`)) return;
-  db.ref(`eventos/${eventoId}`).remove();
-  logActivity("Eventos", `ha eliminado el evento "${nombre}"`);
-  showToast("Evento eliminado");
+  db.ref(`eventos/${eventoId}`).remove()
+    .then(() => {
+      logActivity("Eventos", `ha eliminado el evento "${nombre}"`);
+      showToast("Evento eliminado");
+      // Actualización optimista: quitar de la caché y repintar
+      allEventosCache = allEventosCache.filter(e => e.id !== eventoId);
+      renderEventos(allEventosCache);
+    })
+    .catch(err => {
+      console.error("[eventos] borrado denegado:", err);
+      showToast("⚠️ No se pudo eliminar el evento — revisa las reglas de Firebase");
+    });
 }
 
 /* ═══════════════════════════════════════
