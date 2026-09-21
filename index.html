@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#e07b39" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Familia" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icono_familia.jpeg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Familia</title>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════
+       MODAL: Selección de usuario
+  ═══════════════════════════════════════ -->
+  <div id="user-modal" class="user-modal" role="dialog" aria-modal="true" aria-label="¿Quién eres?">
+    <div class="user-modal-content">
+      <div class="user-modal-logo">🏡</div>
+      <h2>¡Hola! ¿Quién eres?</h2>
+      <p class="user-modal-subtitle">Elige tu nombre para que los demás sepan quién hace los cambios</p>
+      <div class="user-grid" id="user-grid">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       DRAWER BACKDROP
+  ═══════════════════════════════════════ -->
+  <div id="drawer-overlay" class="drawer-overlay"></div>
+
+  <!-- ═══════════════════════════════════════
+       DRAWER: Menú lateral
+  ═══════════════════════════════════════ -->
+  <nav id="drawer" class="drawer" aria-label="Menú principal">
+    <div class="drawer-header">
+      <span class="drawer-logo">🏡</span>
+      <span class="drawer-title">Familia</span>
+    </div>
+
+    <ul class="drawer-nav" role="list">
+      <li>
+        <button class="drawer-link active" data-section="home">
+          <span class="drawer-icon">🏠</span>
+          <span>Inicio</span>
+        </button>
+      </li>
+      <li>
+        <button class="drawer-link" data-section="comida">
+          <span class="drawer-icon">🍽️</span>
+          <span>Comida</span>
+        </button>
+      </li>
+      <li>
+        <button class="drawer-link" data-section="coche">
+          <span class="drawer-icon">🚗</span>
+          <span>Coche</span>
+        </button>
+      </li>
+      <li>
+        <button class="drawer-link" data-section="eventos">
+          <span class="drawer-icon">📅</span>
+          <span>Eventos</span>
+        </button>
+      </li>
+    </ul>
+
+    <div class="drawer-footer">
+      <div class="drawer-user-info">
+        <div class="drawer-user-avatar" id="drawer-user-avatar">?</div>
+        <div>
+          <div class="drawer-user-label">Conectado como</div>
+          <div class="drawer-user-name" id="drawer-user-name">—</div>
+        </div>
+      </div>
+      <button class="drawer-change-user" id="change-user-btn">Cambiar</button>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════════════
+       HEADER
+  ═══════════════════════════════════════ -->
+  <header class="app-header" id="app-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú">
+      <span class="hamburger">
+        <span></span><span></span><span></span>
+      </span>
+    </button>
+    <h1 class="header-title" id="section-title">Inicio</h1>
+    <div class="header-user-badge" id="header-user-badge" title="">?</div>
+  </header>
+
+  <!-- ═══════════════════════════════════════
+       MAIN CONTENT
+  ═══════════════════════════════════════ -->
+  <main class="app-main" id="app-main">
+
+    <!-- ─── INICIO ─── -->
+    <section id="sec-home" class="section active">
+      <div class="family-photo-placeholder" id="family-photo">
+        <img src="Foto_familia.jpg" alt="Familia" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" />
+      </div>
+
+      <div class="section-card">
+        <h2 class="section-card-title">
+          <span class="section-card-icon">⚡</span>
+          Últimos movimientos
+        </h2>
+        <ul class="activity-feed" id="home-feed">
+          <li class="activity-empty">Cargando...</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ─── COMIDA ─── -->
+    <section id="sec-comida" class="section">
+      <!-- Week navigation -->
+      <div class="week-nav">
+        <button class="week-nav-btn" id="comida-prev" aria-label="Semana anterior">‹</button>
+        <span class="week-nav-label" id="comida-week-label">Cargando...</span>
+        <button class="week-nav-btn" id="comida-next" aria-label="Semana siguiente">›</button>
+      </div>
+
+      <!-- Day tabs -->
+      <div class="day-tabs-wrapper">
+        <div class="day-tabs" id="comida-day-tabs" role="tablist">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Day content -->
+      <div id="comida-day-content" class="day-content">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- Activity feed -->
+      <div class="section-card mt-lg">
+        <h2 class="section-card-title">
+          <span class="section-card-icon">⚡</span>
+          Últimos movimientos
+        </h2>
+        <ul class="activity-feed" id="comida-feed">
+          <li class="activity-empty">Sin cambios recientes</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ─── COCHE ─── -->
+    <section id="sec-coche" class="section">
+      <div class="week-nav">
+        <button class="week-nav-btn" id="coche-prev" aria-label="Semana anterior">‹</button>
+        <span class="week-nav-label" id="coche-week-label">Cargando...</span>
+        <button class="week-nav-btn" id="coche-next" aria-label="Semana siguiente">›</button>
+      </div>
+
+      <div class="day-tabs-wrapper">
+        <div class="day-tabs" id="coche-day-tabs" role="tablist">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <div id="coche-day-content" class="day-content">
+        <!-- populated by JS -->
+      </div>
+
+      <div class="section-card mt-lg">
+        <h2 class="section-card-title">
+          <span class="section-card-icon">⚡</span>
+          Últimos movimientos
+        </h2>
+        <ul class="activity-feed" id="coche-feed">
+          <li class="activity-empty">Sin cambios recientes</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ─── EVENTOS ─── -->
+    <section id="sec-eventos" class="section">
+
+      <!-- Semana de eventos -->
+      <div class="week-nav">
+        <button class="week-nav-btn" id="eventos-prev" aria-label="Semana anterior">‹</button>
+        <span class="week-nav-label" id="eventos-week-label">Cargando...</span>
+        <button class="week-nav-btn" id="eventos-next" aria-label="Semana siguiente">›</button>
+      </div>
+
+      <!-- Tabs de día -->
+      <div class="day-tabs-wrapper">
+        <div class="day-tabs" id="eventos-day-tabs" role="tablist">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Eventos del día seleccionado -->
+      <div id="eventos-day-content" class="day-content">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- Próximos eventos (lista global) -->
+      <div class="section-card mt-lg">
+        <h2 class="section-card-title">
+          <span class="section-card-icon">📌</span>
+          Próximos eventos
+        </h2>
+        <div id="eventos-list">
+          <div class="activity-empty">Sin eventos próximos</div>
+        </div>
+      </div>
+
+      <!-- Últimos movimientos -->
+      <div class="section-card mt-lg">
+        <h2 class="section-card-title">
+          <span class="section-card-icon">⚡</span>
+          Últimos movimientos
+        </h2>
+        <ul class="activity-feed" id="eventos-feed">
+          <li class="activity-empty">Sin cambios recientes</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════
+       BOTTOM SHEET: Reserva de coche
+  ═══════════════════════════════════════ -->
+  <div id="sheet-overlay" class="sheet-overlay"></div>
+  <div id="reserva-sheet" class="bottom-sheet" role="dialog" aria-modal="true" aria-label="Reservar coche">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title" id="sheet-title">Reservar coche</h3>
+    <form id="reserva-form" class="sheet-form" novalidate>
+      <input type="hidden" id="reserva-id" />
+      <input type="hidden" id="reserva-coche-id" />
+
+      <div class="form-group">
+        <label class="form-label">Persona</label>
+        <select id="reserva-persona" class="form-select">
+          <!-- populated by JS -->
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Coche</label>
+        <div id="reserva-coche-display" class="coche-display-badge"></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="reserva-inicio">Desde</label>
+          <input type="time" id="reserva-inicio" class="form-input" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reserva-fin">Hasta</label>
+          <input type="time" id="reserva-fin" class="form-input" required />
+        </div>
+      </div>
+
+      <div id="reserva-overlap-warning" class="overlap-warning hidden">
+        ⚠️ Hay solapamiento con otra reserva de este coche
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="sheet-cancel-btn">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       MODAL: Evento
+  ═══════════════════════════════════════ -->
+  <div id="evento-modal-overlay" class="modal-overlay"></div>
+  <div id="evento-modal" class="modal" role="dialog" aria-modal="true" aria-label="Evento">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="evento-modal-title">Añadir evento</h3>
+        <button class="modal-close" id="evento-modal-close" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="evento-form" class="modal-form" novalidate>
+        <input type="hidden" id="evento-id" />
+
+        <div class="form-group">
+          <label class="form-label" for="evento-nombre">Nombre del evento</label>
+          <input type="text" id="evento-nombre" class="form-input" placeholder="Ej: Cumpleaños de Mamá" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="evento-fecha">Fecha</label>
+          <input type="date" id="evento-fecha" class="form-input" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="evento-desc">Descripción (opcional)</label>
+          <textarea id="evento-desc" class="form-textarea" placeholder="Detalles del evento..." rows="2"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">¿Quién va?</label>
+          <div class="persona-chips" id="evento-personas-chips">
+            <!-- populated by JS -->
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="evento-cancel-btn">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       FAB: Añadir evento
+  ═══════════════════════════════════════ -->
+  <button id="add-evento-fab" class="fab" aria-label="Añadir evento">+</button>
+
+  <!-- ═══════════════════════════════════════
+       TOAST de notificación
+  ═══════════════════════════════════════ -->
+  <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+  <!-- Firebase SDK (compat v10) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>

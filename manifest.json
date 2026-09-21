@@ -1,0 +1,19 @@
+{
+  "name": "Familia App",
+  "short_name": "Familia",
+  "description": "Comida, coches y eventos de la familia",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff8f0",
+  "theme_color": "#e07b39",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icono_familia.jpeg",
+      "sizes": "any",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}
