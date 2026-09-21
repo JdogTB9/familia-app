@@ -31,6 +31,9 @@ module.exports = async function handler(req, res) {
     data: { sender }
   };
 
+  // No enviar al propio emisor
+  if (sender) payload.excluded_external_user_ids = [sender];
+
   try {
     const r = await fetch("https://api.onesignal.com/notifications", {
       method: "POST",
