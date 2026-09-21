@@ -1311,3 +1311,97 @@ ul { list-style: none; }
   font-weight: 700;
   color: var(--color-text-muted);
 }
+
+/* ═══════════════════════════════════════
+   COMPRA (lista de la compra)
+═══════════════════════════════════════ */
+.compra-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.compra-action-btn {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.82rem;
+}
+.compra-action-btn.danger { background: #fdecea; color: var(--color-danger); }
+.compra-action-btn.danger:hover { background: #f8d7d3; }
+
+.compra-sub { margin-bottom: 0.85rem; }
+.compra-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.compra-sub-title { margin-bottom: 0; }
+.compra-count {
+  display: inline-block;
+  min-width: 1.3rem;
+  text-align: center;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  margin-left: 0.25rem;
+}
+.compra-sub-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+.compra-mini-btn {
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-pill);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.compra-mini-btn:hover { background: var(--color-border); }
+.compra-mini-btn.danger { color: var(--color-danger); }
+
+.compra-items { display: flex; flex-direction: column; }
+.compra-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.5rem 0.15rem;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+.compra-item:last-child { border-bottom: none; }
+.compra-check {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-secondary);
+  flex-shrink: 0;
+}
+.compra-item-text {
+  flex: 1;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  word-break: break-word;
+}
+.compra-item-text.done {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+.compra-del {
+  font-size: 0.95rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+  padding: 0.2rem;
+}
+.compra-del:hover { opacity: 1; }
+.compra-add-row { margin-top: 0.5rem; }
+.compra-add-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  outline: none;
+}
+.compra-add-input:focus { border-color: var(--color-primary); border-style: solid; }

@@ -14,6 +14,35 @@
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <title>Familia</title>
+
+  <!-- OneSignal Web Push (v16) -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function (OneSignal) {
+      await OneSignal.init({
+        appId: "9508f369-0b2b-4e37-9de4-d6ae4ae61fbb",
+        serviceWorkerPath: "onesignal/OneSignalSDKWorker.js",
+        serviceWorkerParam: { scope: "/onesignal/" },
+        allowLocalhostAsSecureOrigin: true,
+        promptOptions: {
+          slidedown: {
+            prompts: [{
+              type: "push",
+              autoPrompt: true,
+              text: {
+                actionMessage: "¿Quieres recibir avisos cuando la familia haga cambios?",
+                acceptButton: "Sí",
+                cancelButton: "Ahora no"
+              },
+              delay: { pageViews: 1, timeDelay: 3 }
+            }]
+          }
+        }
+      });
+      if (typeof onPushReady === "function") onPushReady(OneSignal);
+    });
+  </script>
 </head>
 <body>
 
@@ -68,6 +97,12 @@
         <button class="drawer-link" data-section="eventos">
           <span class="drawer-icon">📅</span>
           <span>Eventos</span>
+        </button>
+      </li>
+      <li>
+        <button class="drawer-link" data-section="compra">
+          <span class="drawer-icon">🛒</span>
+          <span>Compra</span>
         </button>
       </li>
     </ul>
@@ -226,6 +261,19 @@
         <ul class="activity-feed" id="eventos-feed">
           <li class="activity-empty">Sin cambios recientes</li>
         </ul>
+      </div>
+    </section>
+
+    <!-- ─── COMPRA ─── -->
+    <section id="sec-compra" class="section">
+      <div class="compra-actions">
+        <button class="btn btn-ghost compra-action-btn" id="compra-nueva-sub">+ Nueva subsección</button>
+        <button class="btn btn-ghost compra-action-btn" id="compra-borrar-comprados">Borrar comprados</button>
+        <button class="btn btn-ghost compra-action-btn" id="compra-dejar-marcado">Dejar solo lo marcado</button>
+        <button class="btn btn-ghost compra-action-btn danger" id="compra-vaciar-todo">Vaciar todo</button>
+      </div>
+      <div id="compra-list">
+        <div class="activity-empty">Cargando...</div>
       </div>
     </section>
 

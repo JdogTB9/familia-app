@@ -37,8 +37,13 @@ const DIAS_KEY  = ["lunes","martes","miercoles","jueves","viernes","sabado","dom
 const DIAS_ABBR = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
 const DIAS_FULL = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
 
-const SECTION_NAMES = { home: "Inicio", comida: "Comida", coche: "Coche", eventos: "Eventos" };
-const SECTION_TITLES = { home: "Inicio", comida: "Comida", coche: "Coche 🚗", eventos: "Eventos" };
+const SECTION_NAMES = { home: "Inicio", comida: "Comida", coche: "Coche", eventos: "Eventos", compra: "Compra" };
+const SECTION_TITLES = { home: "Inicio", comida: "Comida", coche: "Coche 🚗", eventos: "Eventos", compra: "Compra 🛒" };
+
+const COMPRA_SUBS_DEFAULT = [
+  "Frutas y verdura", "Congelados", "Pescado, Carne y Huevos", "Pan y Desayunos",
+  "Arroz, Pasta y Legumbres", "Conservas", "Lácteos", "Embutidos", "Higiene y Limpieza", "Otros"
+];
 
 const EVENTO_COLORS = ["#e07b39","#5d8a5e","#2c4a6e","#9b59b6","#c0392b","#16a085","#f39c12"];
 
@@ -90,6 +95,12 @@ let comidaDefaults = {};
 let eventoWeekOffset = 0;
 let eventoSelectedDia = null;
 let allEventosCache = [];
+
+// Compra — estado
+let compraItemsCache = [];   // plano: { id, subseccion, texto, comprado, ts }
+let compraSubsCache  = [];   // subsecciones custom: { id, nombre, ts }
+let compraUIWired    = false;
+let compraFocusSub   = null; // subKey a re-enfocar tras render
 
 /* ═══════════════════════════════════════
    INIT
@@ -236,8 +247,7 @@ function selectUser(nombre) {
   hideUserModal();
   updateUserUI();
   navigateTo("home");
-  initNotificationListener();
-  requestNotificationPermission();
+  applyPushIdentity();
 }
 
 function updateUserUI() {
@@ -306,6 +316,7 @@ function navigateTo(section) {
   if (section === "comida")  initComida();
   if (section === "coche")   initCoche();
   if (section === "eventos") initEventos();
+  if (section === "compra")  initCompra();
 }
 
 /* ═══════════════════════════════════════
@@ -315,6 +326,7 @@ function logActivity(seccion, descripcion) {
   if (!db) return;
   const persona = getUser() || "Alguien";
   db.ref("actividad").push({ persona, seccion, descripcion, timestamp: Date.now() });
+  sendPush(seccion, descripcion, persona);
 }
 
 function relativeTime(ts) {
@@ -1396,6 +1408,243 @@ function deleteEvento(eventoId, nombre) {
 }
 
 /* ═══════════════════════════════════════
+   COMPRA SECTION (lista de la compra)
+   ▸ Lista compartida. Sin listener on() (red inestable): carga con
+     once()+reintentos+unión y actualización optimista al escribir.
+═══════════════════════════════════════ */
+function compraSlug(nombre) {
+  return (nombre || "").toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "otros";
+}
+
+function compraSubList() {
+  const subs = COMPRA_SUBS_DEFAULT.map(nombre => ({ key: compraSlug(nombre), nombre, custom: false }));
+  compraSubsCache.slice()
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    .forEach(s => subs.push({ key: s.id, nombre: s.nombre, custom: true }));
+  return subs;
+}
+
+function initCompra() {
+  if (!db) return;
+  if (!compraUIWired) {
+    compraUIWired = true;
+    document.getElementById("compra-nueva-sub").addEventListener("click", addCompraSubseccion);
+    document.getElementById("compra-borrar-comprados").addEventListener("click", () => clearCompra("comprados"));
+    document.getElementById("compra-dejar-marcado").addEventListener("click", () => clearCompra("no-marcados"));
+    document.getElementById("compra-vaciar-todo").addEventListener("click", () => clearCompra("todo"));
+  }
+  refreshCompra();
+  setTimeout(() => { if (currentSection === "compra") refreshCompra(); }, 1500);
+  setTimeout(() => { if (currentSection === "compra") refreshCompra(); }, 4000);
+}
+
+function refreshCompra() {
+  if (!db) return;
+  db.ref("compra").once("value").then(snap => {
+    const val = snap.val() || {};
+    const itemsById = {};
+    compraItemsCache.forEach(it => { if (it && it.id) itemsById[it.id] = it; });
+    const items = val.items || {};
+    Object.keys(items).forEach(id => { itemsById[id] = { id, ...items[id] }; });
+    compraItemsCache = Object.values(itemsById);
+    const subsById = {};
+    compraSubsCache.forEach(s => { if (s && s.id) subsById[s.id] = s; });
+    const subs = val.subsecciones || {};
+    Object.keys(subs).forEach(id => { subsById[id] = { id, ...subs[id] }; });
+    compraSubsCache = Object.values(subsById);
+    renderCompra();
+  }).catch(err => {
+    console.error("[compra] refresh:", err);
+    showToast("⚠️ No se pudo cargar la compra — revisa las reglas de Firebase");
+  });
+}
+
+function renderCompra() {
+  const container = document.getElementById("compra-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  compraSubList().forEach(sub => {
+    const items = compraItemsCache
+      .filter(it => it.subseccion === sub.key)
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const pend = items.filter(it => !it.comprado).length;
+
+    const card = document.createElement("div");
+    card.className = "section-card compra-sub";
+
+    const header = document.createElement("div");
+    header.className = "compra-sub-header";
+    header.innerHTML = `
+      <h2 class="section-card-title compra-sub-title">
+        ${escapeHTML(sub.nombre)}${items.length ? ` <span class="compra-count">${pend}</span>` : ""}
+      </h2>
+      <div class="compra-sub-actions"></div>
+    `;
+    const acts = header.querySelector(".compra-sub-actions");
+    const btnVaciar = document.createElement("button");
+    btnVaciar.className = "compra-mini-btn";
+    btnVaciar.textContent = "vaciar";
+    btnVaciar.addEventListener("click", () => clearCompra("sub", sub.key, sub.nombre));
+    acts.appendChild(btnVaciar);
+    if (sub.custom) {
+      const btnDel = document.createElement("button");
+      btnDel.className = "compra-mini-btn danger";
+      btnDel.textContent = "🗑";
+      btnDel.title = "Borrar subsección";
+      btnDel.addEventListener("click", () => deleteCompraSubseccion(sub.key, sub.nombre));
+      acts.appendChild(btnDel);
+    }
+    card.appendChild(header);
+
+    const itemsBox = document.createElement("div");
+    itemsBox.className = "compra-items";
+    items.forEach(it => itemsBox.appendChild(compraItemRow(it)));
+    card.appendChild(itemsBox);
+
+    const addRow = document.createElement("div");
+    addRow.className = "compra-add-row";
+    const input = document.createElement("input");
+    input.className = "compra-add-input";
+    input.type = "text";
+    input.placeholder = "Añadir artículo…";
+    input.dataset.sub = sub.key;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const texto = input.value.trim();
+        if (texto) addCompraItem(sub.key, sub.nombre, texto);
+      }
+    });
+    addRow.appendChild(input);
+    card.appendChild(addRow);
+
+    container.appendChild(card);
+  });
+
+  if (compraFocusSub) {
+    const sel = (window.CSS && CSS.escape) ? CSS.escape(compraFocusSub) : compraFocusSub;
+    const inp = container.querySelector(`.compra-add-input[data-sub="${sel}"]`);
+    if (inp) inp.focus();
+    compraFocusSub = null;
+  }
+}
+
+function compraItemRow(it) {
+  const row = document.createElement("label");
+  row.className = "compra-item";
+
+  const chk = document.createElement("input");
+  chk.type = "checkbox";
+  chk.className = "compra-check";
+  chk.checked = !!it.comprado;
+  chk.addEventListener("change", () => toggleCompraItem(it.id, chk.checked));
+
+  const txt = document.createElement("span");
+  txt.className = "compra-item-text" + (it.comprado ? " done" : "");
+  txt.textContent = it.texto;
+
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "compra-del";
+  del.textContent = "🗑";
+  del.setAttribute("aria-label", "Borrar");
+  del.addEventListener("click", (e) => { e.preventDefault(); deleteCompraItem(it.id); });
+
+  row.appendChild(chk);
+  row.appendChild(txt);
+  row.appendChild(del);
+  return row;
+}
+
+function addCompraItem(subKey, subNombre, texto) {
+  if (!db) return;
+  const data = { subseccion: subKey, texto, comprado: false, ts: Date.now() };
+  const ref = db.ref("compra/items").push(data);
+  compraItemsCache.push({ id: ref.key, ...data });
+  compraFocusSub = subKey;
+  renderCompra();
+  logActivity("Compra", `ha añadido "${texto}" a ${subNombre}`);
+  ref.catch(err => {
+    console.error("[compra] alta denegada:", err);
+    showToast("⚠️ No se pudo guardar — revisa las reglas de Firebase");
+  });
+}
+
+function toggleCompraItem(id, comprado) {
+  if (!db) return;
+  db.ref(`compra/items/${id}/comprado`).set(comprado);
+  const it = compraItemsCache.find(x => x.id === id);
+  if (it) it.comprado = comprado;
+  renderCompra();
+}
+
+function deleteCompraItem(id) {
+  if (!db) return;
+  db.ref(`compra/items/${id}`).remove();
+  compraItemsCache = compraItemsCache.filter(x => x.id !== id);
+  renderCompra();
+}
+
+function clearCompra(modo, subKey, subNombre) {
+  if (!db) return;
+  let idsToRemove = [];
+  let msg = "";
+  if (modo === "sub") {
+    if (!confirm(`¿Vaciar "${subNombre}"?`)) return;
+    idsToRemove = compraItemsCache.filter(it => it.subseccion === subKey).map(it => it.id);
+    msg = `ha vaciado ${subNombre} de la compra`;
+  } else if (modo === "todo") {
+    if (!confirm("¿Vaciar TODA la lista de la compra?")) return;
+    idsToRemove = compraItemsCache.map(it => it.id);
+    msg = "ha vaciado toda la lista de la compra";
+  } else if (modo === "comprados") {
+    idsToRemove = compraItemsCache.filter(it => it.comprado).map(it => it.id);
+    if (idsToRemove.length === 0) { showToast("No hay nada marcado como comprado"); return; }
+    msg = "ha borrado lo comprado de la lista";
+  } else if (modo === "no-marcados") {
+    if (compraItemsCache.filter(it => it.comprado).length === 0) { showToast("No hay nada marcado"); return; }
+    if (!confirm("¿Borrar todo lo NO marcado y dejar solo lo marcado?")) return;
+    idsToRemove = compraItemsCache.filter(it => !it.comprado).map(it => it.id);
+    msg = "ha dejado solo lo marcado en la compra";
+  }
+  if (idsToRemove.length === 0) { showToast("La lista ya está vacía"); return; }
+  const updates = {};
+  idsToRemove.forEach(id => { updates[`compra/items/${id}`] = null; });
+  db.ref().update(updates);
+  const removeSet = new Set(idsToRemove);
+  compraItemsCache = compraItemsCache.filter(it => !removeSet.has(it.id));
+  renderCompra();
+  if (msg) logActivity("Compra", msg);
+}
+
+function addCompraSubseccion() {
+  if (!db) return;
+  const nombre = (prompt("Nombre de la nueva subsección:") || "").trim();
+  if (!nombre) return;
+  const data = { nombre, ts: Date.now() };
+  const ref = db.ref("compra/subsecciones").push(data);
+  compraSubsCache.push({ id: ref.key, ...data });
+  renderCompra();
+  ref.catch(err => {
+    console.error("[compra] subsección denegada:", err);
+    showToast("⚠️ No se pudo crear la subsección");
+  });
+}
+
+function deleteCompraSubseccion(subId, subNombre) {
+  if (!db) return;
+  if (!confirm(`¿Borrar la subsección "${subNombre}" y sus artículos?`)) return;
+  const updates = { [`compra/subsecciones/${subId}`]: null };
+  compraItemsCache.filter(it => it.subseccion === subId).forEach(it => { updates[`compra/items/${it.id}`] = null; });
+  db.ref().update(updates);
+  compraSubsCache = compraSubsCache.filter(s => s.id !== subId);
+  compraItemsCache = compraItemsCache.filter(it => it.subseccion !== subId);
+  renderCompra();
+}
+
+/* ═══════════════════════════════════════
    TOAST
 ═══════════════════════════════════════ */
 let toastTimer = null;
@@ -1408,33 +1657,42 @@ function showToast(msg, duration = 2800) {
 }
 
 /* ═══════════════════════════════════════
-   NOTIFICACIONES
+   NOTIFICACIONES (OneSignal Web Push)
+   ▸ El SDK se inicializa en index.html y llama a onPushReady().
+   ▸ El envío con la app cerrada lo hace la función serverless /api/notify,
+     que guarda la REST API key en Vercel (no en el cliente).
 ═══════════════════════════════════════ */
-let notifListenerActive = false;
+let oneSignalInstance = null;
 
-function requestNotificationPermission() {
-  if (!("Notification" in window) || Notification.permission !== "default") return;
-  setTimeout(() => Notification.requestPermission(), 2500);
+// index.html llama aquí cuando OneSignal termina de inicializar
+function onPushReady(OneSignal) {
+  oneSignalInstance = OneSignal;
+  applyPushIdentity();
 }
 
-function initNotificationListener() {
-  if (!db || notifListenerActive) return;
-  notifListenerActive = true;
-  const initTs = Date.now();
-  db.ref("actividad").limitToLast(1).on("value", snap => {
-    snap.forEach(child => {
-      const v = child.val();
-      if (v.timestamp > initTs && v.persona !== getUser() && Notification.permission === "granted") {
-        try {
-          new Notification(`${v.persona} — ${v.seccion}`, {
-            body: v.descripcion,
-            icon: "/icono_familia.jpeg",
-            tag:  "familia-activity"
-          });
-        } catch (e) {}
-      }
-    });
-  });
+// Identifica el dispositivo con el nombre del miembro
+function applyPushIdentity() {
+  if (!oneSignalInstance) return;
+  const nombre = getUser();
+  if (!nombre) return;
+  try {
+    oneSignalInstance.login(nombre);
+    if (oneSignalInstance.User && oneSignalInstance.User.addTag) {
+      oneSignalInstance.User.addTag("miembro", nombre);
+    }
+  } catch (e) {}
+}
+
+// Envía un aviso a los demás vía la función serverless (oculta la REST API key).
+// Silencioso: en local (sin /api) o si falla, no rompe nada.
+function sendPush(seccion, descripcion, persona) {
+  try {
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: `${persona} — ${seccion}`, body: descripcion, sender: persona })
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 /* ═══════════════════════════════════════
