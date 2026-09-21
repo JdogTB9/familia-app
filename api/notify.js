@@ -22,17 +22,17 @@ module.exports = async function handler(req, res) {
   const content = (b.body || "").toString().slice(0, 300);
   const sender = (b.sender || "").toString();
 
+  const FAMILIA = ["Papá", "Mamá", "Manuel", "Javier", "Lucía", "Ana"];
+  const recipients = sender ? FAMILIA.filter(m => m !== sender) : FAMILIA;
+
   const payload = {
     app_id: APP_ID,
-    target_channel: "push",
-    included_segments: ["Subscribed Users"],
+    include_external_user_ids: recipients,
+    channel_for_external_user_ids: "push",
     headings: { en: heading, es: heading },
     contents: { en: content, es: content },
     data: { sender }
   };
-
-  // No enviar al propio emisor
-  if (sender) payload.excluded_external_user_ids = [sender];
 
   try {
     const r = await fetch("https://api.onesignal.com/notifications", {
