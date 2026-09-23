@@ -1434,6 +1434,7 @@ function initCompra() {
     document.getElementById("compra-borrar-comprados").addEventListener("click", () => clearCompra("comprados"));
     document.getElementById("compra-dejar-marcado").addEventListener("click", () => clearCompra("no-marcados"));
     document.getElementById("compra-vaciar-todo").addEventListener("click", () => clearCompra("todo"));
+    document.getElementById("compra-desmarcar").addEventListener("click", resetComprados);
   }
   refreshCompra();
   setTimeout(() => { if (currentSection === "compra") refreshCompra(); }, 1500);
@@ -1565,7 +1566,6 @@ function addCompraItem(subKey, subNombre, texto) {
   compraItemsCache.push({ id: ref.key, ...data });
   compraFocusSub = subKey;
   renderCompra();
-  logActivity("Compra", `ha añadido "${texto}" a ${subNombre}`);
   ref.catch(err => {
     console.error("[compra] alta denegada:", err);
     showToast("⚠️ No se pudo guardar — revisa las reglas de Firebase");
@@ -1590,24 +1590,19 @@ function deleteCompraItem(id) {
 function clearCompra(modo, subKey, subNombre) {
   if (!db) return;
   let idsToRemove = [];
-  let msg = "";
   if (modo === "sub") {
     if (!confirm(`¿Vaciar "${subNombre}"?`)) return;
     idsToRemove = compraItemsCache.filter(it => it.subseccion === subKey).map(it => it.id);
-    msg = `ha vaciado ${subNombre} de la compra`;
   } else if (modo === "todo") {
     if (!confirm("¿Vaciar TODA la lista de la compra?")) return;
     idsToRemove = compraItemsCache.map(it => it.id);
-    msg = "ha vaciado toda la lista de la compra";
   } else if (modo === "comprados") {
     idsToRemove = compraItemsCache.filter(it => it.comprado).map(it => it.id);
     if (idsToRemove.length === 0) { showToast("No hay nada marcado como comprado"); return; }
-    msg = "ha borrado lo comprado de la lista";
   } else if (modo === "no-marcados") {
     if (compraItemsCache.filter(it => it.comprado).length === 0) { showToast("No hay nada marcado"); return; }
     if (!confirm("¿Borrar todo lo NO marcado y dejar solo lo marcado?")) return;
     idsToRemove = compraItemsCache.filter(it => !it.comprado).map(it => it.id);
-    msg = "ha dejado solo lo marcado en la compra";
   }
   if (idsToRemove.length === 0) { showToast("La lista ya está vacía"); return; }
   const updates = {};
@@ -1616,7 +1611,17 @@ function clearCompra(modo, subKey, subNombre) {
   const removeSet = new Set(idsToRemove);
   compraItemsCache = compraItemsCache.filter(it => !removeSet.has(it.id));
   renderCompra();
-  if (msg) logActivity("Compra", msg);
+}
+
+function resetComprados() {
+  if (!db) return;
+  const marcados = compraItemsCache.filter(it => it.comprado);
+  if (marcados.length === 0) { showToast("No hay nada marcado como comprado"); return; }
+  const updates = {};
+  marcados.forEach(it => { updates[`compra/items/${it.id}/comprado`] = false; });
+  db.ref().update(updates);
+  compraItemsCache = compraItemsCache.map(it => it.comprado ? { ...it, comprado: false } : it);
+  renderCompra();
 }
 
 function addCompraSubseccion() {
