@@ -24,7 +24,7 @@ module.exports = async function handler(req, res) {
 
   const payload = {
     app_id: APP_ID,
-    included_segments: ["Subscribed Users"],
+    included_segments: ["Total Subscriptions"],
     headings: { en: heading, es: heading },
     contents: { en: content, es: content },
     data: { sender }
