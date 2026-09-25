@@ -24,14 +24,20 @@ module.exports = async function handler(req, res) {
 
   const payload = {
     app_id: APP_ID,
-    included_segments: ["Total Subscriptions"],
     headings: { en: heading, es: heading },
     contents: { en: content, es: content },
     data: { sender }
   };
 
-  // Excluir al emisor si tiene External ID registrado
-  if (sender) payload.excluded_external_user_ids = [sender];
+  // Excluir al emisor por tag "miembro" (más fiable que excluded_external_user_ids,
+  // que requiere External ID vinculado vía login() — el tag se guarda por suscripción)
+  if (sender) {
+    payload.filters = [
+      { field: "tag", key: "miembro", relation: "!=", value: sender }
+    ];
+  } else {
+    payload.included_segments = ["Total Subscriptions"];
+  }
 
   try {
     const r = await fetch("https://api.onesignal.com/notifications", {
