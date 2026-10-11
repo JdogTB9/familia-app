@@ -80,6 +80,8 @@ let editingReservaId   = null;
 let editingReservaCoche = null;
 let editingReservaDia   = null;
 let editingReservaSemana = null;
+let editingReservaOffset = 0;      // offset de semana fijado al abrir el sheet
+let editingReservaData   = null;   // datos originales (para localizar la serie)
 
 // Estado edición de evento
 let editingEventoId = null;
@@ -101,6 +103,13 @@ let compraItemsCache = [];   // plano: { id, subseccion, texto, comprado, ts }
 let compraSubsCache  = [];   // subsecciones custom: { id, nombre, ts }
 let compraUIWired    = false;
 let compraFocusSub   = null; // subKey a re-enfocar tras render
+
+// Vista día / semana por sección (persistida en localStorage)
+const vistaSeccion = {
+  comida:  localStorage.getItem("vista_comida")  || "dia",
+  coche:   localStorage.getItem("vista_coche")   || "dia",
+  eventos: localStorage.getItem("vista_eventos") || "dia"
+};
 
 /* ═══════════════════════════════════════
    INIT
@@ -164,6 +173,34 @@ function initUI() {
   // Eventos week nav
   document.getElementById("eventos-prev").addEventListener("click", () => { eventoWeekOffset--; loadEventosWeek(); });
   document.getElementById("eventos-next").addEventListener("click", () => { eventoWeekOffset++; loadEventosWeek(); });
+
+  // Selector de semana (calendario) al pulsar la etiqueta
+  document.getElementById("comida-week-label").addEventListener("click", () => {
+    openWeekPicker(getMondayOfWeek(comidaWeekOffset), (off, day) => {
+      comidaWeekOffset = off; comidaSelectedDia = day; loadComidaWeek();
+    });
+  });
+  document.getElementById("coche-week-label").addEventListener("click", () => {
+    openWeekPicker(getMondayOfWeek(cocheWeekOffset), (off, day) => {
+      cocheWeekOffset = off; cocheSelectedDia = day; loadCocheWeek();
+    });
+  });
+  document.getElementById("eventos-week-label").addEventListener("click", () => {
+    openWeekPicker(getMondayOfWeek(eventoWeekOffset), (off, day) => {
+      eventoWeekOffset = off; eventoSelectedDia = day; loadEventosWeek();
+    });
+  });
+  initWeekPicker();
+
+  // Vista día / semana
+  document.getElementById("comida-view-toggle").addEventListener("click", () => toggleVista("comida"));
+  document.getElementById("coche-view-toggle").addEventListener("click", () => toggleVista("coche"));
+  document.getElementById("eventos-view-toggle").addEventListener("click", () => toggleVista("eventos"));
+  ["comida", "coche", "eventos"].forEach(updateVistaUI);
+
+  // Sheet de alcance al borrar reserva recurrente
+  document.getElementById("scope-sheet-overlay").addEventListener("click", closeScopeSheet);
+  document.getElementById("scope-cancel-btn").addEventListener("click", closeScopeSheet);
 
   // FAB evento
   document.getElementById("add-evento-fab").addEventListener("click", () => openEventoModal());
@@ -452,6 +489,165 @@ function getTodayDayKey() {
   return DIAS_KEY[getTodayDayIndex()];
 }
 
+/* ═══════════════════════════════════════
+   SELECTOR DE SEMANA (CALENDARIO)
+═══════════════════════════════════════ */
+const MESES_FULL = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+let wpYear = 0, wpMonth = 0;      // mes mostrado en el calendario
+let wpSelectedMonday = null;      // semana que se está viendo en la sección
+let wpOnPick = null;
+
+function initWeekPicker() {
+  const monthSel = document.getElementById("wp-month");
+  MESES_FULL.forEach((m, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = m;
+    monthSel.appendChild(opt);
+  });
+  monthSel.addEventListener("change", () => { wpMonth = Number(monthSel.value); renderWeekPickerGrid(); });
+  document.getElementById("wp-year").addEventListener("change", (e) => { wpYear = Number(e.target.value); renderWeekPickerGrid(); });
+  document.getElementById("wp-prev").addEventListener("click", () => shiftWeekPickerMonth(-1));
+  document.getElementById("wp-next").addEventListener("click", () => shiftWeekPickerMonth(1));
+  document.getElementById("wp-today").addEventListener("click", () => pickWeekPickerDate(new Date()));
+  document.getElementById("wp-cancel").addEventListener("click", closeWeekPicker);
+  document.getElementById("week-picker-close").addEventListener("click", closeWeekPicker);
+  document.getElementById("week-picker-overlay").addEventListener("click", closeWeekPicker);
+  document.getElementById("week-picker").addEventListener("click", (e) => {
+    if (e.target.id === "week-picker") closeWeekPicker();
+  });
+}
+
+function openWeekPicker(currentMonday, onPick) {
+  wpSelectedMonday = new Date(currentMonday);
+  wpOnPick = onPick;
+  wpYear  = currentMonday.getFullYear();
+  wpMonth = currentMonday.getMonth();
+  document.getElementById("week-picker-overlay").classList.add("open");
+  document.getElementById("week-picker").classList.add("open");
+  renderWeekPickerGrid();
+}
+
+function closeWeekPicker() {
+  document.getElementById("week-picker-overlay").classList.remove("open");
+  document.getElementById("week-picker").classList.remove("open");
+}
+
+function shiftWeekPickerMonth(delta) {
+  const d = new Date(wpYear, wpMonth + delta, 1);
+  wpYear = d.getFullYear();
+  wpMonth = d.getMonth();
+  renderWeekPickerGrid();
+}
+
+function pickWeekPickerDate(date) {
+  const fecha = toLocalDateStr(date);
+  closeWeekPicker();
+  if (wpOnPick) wpOnPick(fechaToWeekOffset(fecha), fechaToDayKey(fecha));
+}
+
+function renderWeekPickerGrid() {
+  // Selector de año: rango alrededor del año actual (y siempre incluye el mostrado)
+  const yearSel = document.getElementById("wp-year");
+  const thisYear = new Date().getFullYear();
+  const from = Math.min(thisYear - 3, wpYear), to = Math.max(thisYear + 5, wpYear);
+  yearSel.innerHTML = "";
+  for (let y = from; y <= to; y++) {
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = y;
+    yearSel.appendChild(opt);
+  }
+  yearSel.value = wpYear;
+  document.getElementById("wp-month").value = wpMonth;
+
+  const grid = document.getElementById("wp-grid");
+  grid.innerHTML = "";
+  ["L", "M", "X", "J", "V", "S", "D"].forEach(d => {
+    const h = document.createElement("div");
+    h.className = "wp-head";
+    h.textContent = d;
+    grid.appendChild(h);
+  });
+
+  // Empieza en el lunes de la semana que contiene el día 1 y pinta 6 semanas
+  const first = new Date(wpYear, wpMonth, 1);
+  const start = new Date(first);
+  start.setDate(1 - (first.getDay() + 6) % 7);
+  const selStart = wpSelectedMonday ? wpSelectedMonday.getTime() : -1;
+  let selEnd = -1;
+  if (wpSelectedMonday) {
+    const e = new Date(wpSelectedMonday);
+    e.setDate(e.getDate() + 7);
+    selEnd = e.getTime();
+  }
+
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "wp-day" +
+      (d.getMonth() !== wpMonth ? " other-month" : "") +
+      (isToday(d) ? " today" : "") +
+      (d.getTime() >= selStart && d.getTime() < selEnd ? " in-week" : "");
+    btn.textContent = d.getDate();
+    btn.addEventListener("click", () => pickWeekPickerDate(d));
+    grid.appendChild(btn);
+  }
+}
+
+/* ═══════════════════════════════════════
+   VISTA DÍA / SEMANA
+═══════════════════════════════════════ */
+function toggleVista(seccion) {
+  vistaSeccion[seccion] = vistaSeccion[seccion] === "semana" ? "dia" : "semana";
+  localStorage.setItem(`vista_${seccion}`, vistaSeccion[seccion]);
+  updateVistaUI(seccion);
+  reloadSeccionWeek(seccion);
+}
+
+// Desde la vista semanal: abrir un día concreto en vista día
+function openDiaDesdeSemana(seccion, dayKey) {
+  if (seccion === "comida")  comidaSelectedDia = dayKey;
+  if (seccion === "coche")   cocheSelectedDia  = dayKey;
+  if (seccion === "eventos") eventoSelectedDia = dayKey;
+  vistaSeccion[seccion] = "dia";
+  localStorage.setItem(`vista_${seccion}`, "dia");
+  updateVistaUI(seccion);
+  reloadSeccionWeek(seccion);
+}
+
+function reloadSeccionWeek(seccion) {
+  if (seccion === "comida")  loadComidaWeek();
+  if (seccion === "coche")   loadCocheWeek();
+  if (seccion === "eventos") loadEventosWeek();
+}
+
+function updateVistaUI(seccion) {
+  const semana = vistaSeccion[seccion] === "semana";
+  const btn = document.getElementById(`${seccion}-view-toggle`);
+  btn.textContent = semana ? "📆" : "📋";
+  btn.title = semana ? "Vista por día" : "Vista semanal";
+  btn.setAttribute("aria-label", btn.title);
+  btn.classList.toggle("active", semana);
+  document.getElementById(`${seccion}-day-tabs`).parentElement.classList.toggle("hidden", semana);
+}
+
+function weekViewDayCard(container, seccion, monday, i, bodyHTML) {
+  const dayDate = new Date(monday);
+  dayDate.setDate(monday.getDate() + i);
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "week-view-day" + (isToday(dayDate) ? " today" : "");
+  card.innerHTML = `
+    <div class="week-view-day-title">${DIAS_FULL[i]} ${dayDate.getDate()}</div>
+    <div class="week-view-day-body">${bodyHTML}</div>
+  `;
+  card.addEventListener("click", () => openDiaDesdeSemana(seccion, DIAS_KEY[i]));
+  container.appendChild(card);
+}
+
 function detachListener(ref, off) {
   if (ref && off) ref.off("value", off);
 }
@@ -482,9 +678,7 @@ function initComida() {
   comidaSelectedDia = getTodayDayKey();
   db.ref("defaults/comida").on("value", snap => {
     comidaDefaults = snap.val() || {};
-    if (currentSection === "comida") {
-      renderComidaDayContent(comidaSelectedDia, getISOWeekKey(getMondayOfWeek(comidaWeekOffset)));
-    }
+    if (currentSection === "comida") renderComidaView();
   });
   loadComidaWeek();
   detachListener(activeComidaFeedRef, activeComidaFeedOff);
@@ -501,16 +695,55 @@ function loadComidaWeek() {
 
   document.getElementById("comida-week-label").textContent = formatWeekLabel(monday);
   renderComidaDayTabs(monday);
-  renderComidaDayContent(comidaSelectedDia, weekKey);
+  renderComidaView();
 
   detachListener(activeComidaRef, activeComidaOff);
   const ref = db.ref(`comida/${weekKey}`);
   const off = ref.on("value", snap => {
     comidaWeekDataCache = snap.val() || {};
-    renderComidaDayContent(comidaSelectedDia, weekKey);
+    renderComidaView();
   });
   activeComidaRef = ref;
   activeComidaOff = off;
+}
+
+// Pinta la vista activa (día o semana) de la semana mostrada
+function renderComidaView() {
+  const monday = getMondayOfWeek(comidaWeekOffset);
+  if (vistaSeccion.comida === "semana") renderComidaWeekView(monday);
+  else renderComidaDayContent(comidaSelectedDia, getISOWeekKey(monday));
+}
+
+function renderComidaWeekView(monday) {
+  const container = document.getElementById("comida-day-content");
+  container.innerHTML = "";
+  const list = document.createElement("div");
+  list.className = "week-view";
+  for (let i = 0; i < 7; i++) {
+    const dayKey  = DIAS_KEY[i];
+    const dayData = comidaWeekDataCache[dayKey] || {};
+    const body = ["comida", "cena"].map(tipo => {
+      const meal = dayData[tipo] || {};
+      const platos = Object.entries(meal.platos || {})
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([, t]) => escapeHTML(t));
+      const personas = meal.personas || {};
+      const comen = FAMILIA.filter(p => {
+        const explicit = personas[p];
+        return (explicit !== undefined && explicit !== null)
+          ? !!explicit
+          : !!(comidaDefaults[p]?.[dayKey]?.[tipo]);
+      }).length;
+      return `
+        <div class="week-view-line">
+          <span class="week-view-icon">${tipo === "comida" ? "🍽️" : "🌙"}</span>
+          <span class="week-view-text${platos.length ? "" : " muted"}">${platos.length ? platos.join(" · ") : "—"}</span>
+          <span class="week-view-meta">👥 ${comen}</span>
+        </div>`;
+    }).join("");
+    weekViewDayCard(list, "comida", monday, i, body);
+  }
+  container.appendChild(list);
 }
 
 function renderComidaDayTabs(monday) {
@@ -815,16 +1048,45 @@ function loadCocheWeek() {
 
   document.getElementById("coche-week-label").textContent = formatWeekLabel(monday);
   renderCocheDayTabs(monday, weekKey);
-  renderCocheDayContent(cocheSelectedDia, weekKey);
+  renderCocheView();
 
   detachListener(activeCocheRef, activeCocheOff);
   const ref = db.ref(`coche/${weekKey}`);
   const off = ref.on("value", snap => {
     cocheWeekData = snap.val() || {};
-    renderCocheDayContent(cocheSelectedDia, weekKey);
+    renderCocheView();
   });
   activeCocheRef = ref;
   activeCocheOff = off;
+}
+
+// Pinta la vista activa (día o semana) de la semana mostrada
+function renderCocheView() {
+  const monday = getMondayOfWeek(cocheWeekOffset);
+  if (vistaSeccion.coche === "semana") renderCocheWeekView(monday);
+  else renderCocheDayContent(cocheSelectedDia, getISOWeekKey(monday));
+}
+
+function renderCocheWeekView(monday) {
+  const container = document.getElementById("coche-day-content");
+  container.innerHTML = "";
+  const list = document.createElement("div");
+  list.className = "week-view";
+  for (let i = 0; i < 7; i++) {
+    const reservas = Object.values((cocheWeekData[DIAS_KEY[i]] || {}).reservas || {})
+      .filter(r => COCHES[r.coche])
+      .sort((a, b) => (a.horaInicio > b.horaInicio ? 1 : -1));
+    const body = reservas.length === 0
+      ? '<div class="week-view-line"><span class="week-view-text muted">Sin reservas</span></div>'
+      : reservas.map(r => `
+        <div class="week-view-line">
+          <span class="car-color-dot" style="background:${COCHES[r.coche].color}" title="${escapeHTML(COCHES[r.coche].nombre)}"></span>
+          <span class="week-view-time">${r.horaInicio}–${r.horaFin}</span>
+          <span class="week-view-text">${escapeHTML(r.persona)} · ${escapeHTML(COCHES[r.coche].nombre)}${r.recurrente ? " 🔁" : ""}</span>
+        </div>`).join("");
+    weekViewDayCard(list, "coche", monday, i, body);
+  }
+  container.appendChild(list);
 }
 
 function renderCocheDayTabs(monday, weekKey) {
@@ -890,7 +1152,7 @@ function renderCocheDayContent(dayKey, weekKey) {
       const editBtn = block.querySelector(`[data-edit="${rId}"]`);
       const delBtn  = block.querySelector(`[data-del="${rId}"]`);
       if (editBtn) editBtn.addEventListener("click", () => openReservaSheet(cocheId, dayKey, weekKey, rId, reservas[rId]));
-      if (delBtn)  delBtn.addEventListener("click", () => deleteReserva(weekKey, dayKey, rId, coche.nombre));
+      if (delBtn)  delBtn.addEventListener("click", () => deleteReserva(weekKey, dayKey, rId, coche.nombre, reservas[rId]));
     });
   });
 }
@@ -915,6 +1177,8 @@ function openReservaSheet(cocheId, dayKey, weekKey, rId = null, reservaData = nu
   editingReservaCoche = cocheId;
   editingReservaDia   = dayKey;
   editingReservaSemana = weekKey;
+  editingReservaOffset = cocheWeekOffset;
+  editingReservaData   = reservaData ? { ...reservaData } : null;
 
   document.getElementById("sheet-title").textContent = rId ? `Editar reserva — ${coche.nombre}` : `Reservar ${coche.nombre}`;
   const badge = document.getElementById("reserva-coche-display");
@@ -929,6 +1193,9 @@ function openReservaSheet(cocheId, dayKey, weekKey, rId = null, reservaData = nu
   document.getElementById("reserva-recurrente").checked = false;
   document.getElementById("reserva-semanas-group").classList.add("hidden");
   document.getElementById("reserva-recurrente-row").classList.toggle("hidden", !!rId);
+  // Al editar una recurrente: elegir si el cambio afecta a esta o a esta y las siguientes
+  document.getElementById("reserva-scope-row").classList.toggle("hidden", !(rId && reservaData?.recurrente));
+  document.querySelector('input[name="reserva-scope"][value="serie"]').checked = true;
 
   document.getElementById("reserva-sheet").classList.add("open");
   document.getElementById("sheet-overlay").classList.add("open");
@@ -968,19 +1235,67 @@ function handleReservaSubmit(e) {
   const esRecurrente = !editingReservaId && document.getElementById("reserva-recurrente").checked;
   const numSemanas   = esRecurrente ? parseInt(document.getElementById("reserva-semanas").value, 10) : 1;
   const data = { persona, coche: editingReservaCoche, horaInicio, horaFin, timestamp: Date.now() };
-  if (esRecurrente) data.recurrente = true;
   const coche = COCHES[editingReservaCoche];
 
   const diaLabelCoche = DIAS_FULL[DIAS_KEY.indexOf(editingReservaDia)] || editingReservaDia;
   const paraQuien = persona !== getUser() ? ` para ${persona}` : "";
+  const onError = err => {
+    console.error("[coche] guardar reserva:", err);
+    showToast("⚠️ No se pudo guardar la reserva");
+  };
+
   if (editingReservaId) {
-    db.ref(`coche/${editingReservaSemana}/${editingReservaDia}/reservas/${editingReservaId}`).update(data);
+    const original = editingReservaData;
+    const scope = document.querySelector('input[name="reserva-scope"]:checked')?.value;
+    if (original?.recurrente && scope === "serie") {
+      // Editar esta y las siguientes de la serie
+      const semana = editingReservaSemana, dia = editingReservaDia, rIdActual = editingReservaId;
+      const serieId = original.serieId || db.ref("coche").push().key;
+      findSerieReservas(editingReservaOffset, dia, original).then(matches => {
+        if (!matches.some(m => m.weekKey === semana && m.rId === rIdActual)) {
+          matches.push({ weekKey: semana, rId: rIdActual });
+        }
+        const updates = {};
+        matches.forEach(m => {
+          const base = `coche/${m.weekKey}/${dia}/reservas/${m.rId}`;
+          updates[`${base}/persona`]    = persona;
+          updates[`${base}/horaInicio`] = horaInicio;
+          updates[`${base}/horaFin`]    = horaFin;
+          updates[`${base}/timestamp`]  = data.timestamp;
+          updates[`${base}/recurrente`] = true;
+          updates[`${base}/serieId`]    = serieId;
+        });
+        db.ref().update(updates).catch(onError);
+        // Optimista: semana mostrada
+        const shownWeek = getISOWeekKey(getMondayOfWeek(cocheWeekOffset));
+        matches.filter(m => m.weekKey === shownWeek).forEach(m => {
+          const r = cocheWeekData[dia]?.reservas?.[m.rId];
+          if (r) Object.assign(r, { persona, horaInicio, horaFin, recurrente: true, serieId });
+        });
+        renderCocheView();
+        logActivity("Coche", `ha modificado su reserva recurrente del ${coche.nombre}${paraQuien} los ${diaLabelCoche.toLowerCase()} (${horaInicio}–${horaFin}) 🔁 ${matches.length} semanas`);
+        showToast(`✓ ${matches.length} reservas actualizadas`);
+      }).catch(onError);
+      closeReservaSheet();
+      return;
+    }
+    // Solo esta: si era recurrente, la sacamos de la serie
+    const upd = { ...data };
+    if (original?.recurrente) { upd.recurrente = null; upd.serieId = null; }
+    db.ref(`coche/${editingReservaSemana}/${editingReservaDia}/reservas/${editingReservaId}`).update(upd).catch(onError);
     logActivity("Coche", `ha modificado su reserva del ${coche.nombre}${paraQuien} el ${diaLabelCoche} (${horaInicio}–${horaFin})`);
   } else {
-    for (let i = 0; i < numSemanas; i++) {
-      const semKey = getISOWeekKey(getMondayOfWeek(cocheWeekOffset + i));
-      db.ref(`coche/${semKey}/${editingReservaDia}/reservas`).push(data);
+    const updates = {};
+    if (esRecurrente) {
+      data.recurrente = true;
+      data.serieId = db.ref("coche").push().key;
     }
+    for (let i = 0; i < numSemanas; i++) {
+      const semKey = getISOWeekKey(getMondayOfWeek(editingReservaOffset + i));
+      const key = db.ref(`coche/${semKey}/${editingReservaDia}/reservas`).push().key;
+      updates[`coche/${semKey}/${editingReservaDia}/reservas/${key}`] = data;
+    }
+    db.ref().update(updates).catch(onError);
     const label = numSemanas > 1 ? ` 🔁 ${numSemanas} semanas` : "";
     logActivity("Coche", `ha reservado el ${coche.nombre}${paraQuien} el ${diaLabelCoche} (${horaInicio}–${horaFin})${label}`);
   }
@@ -989,12 +1304,83 @@ function handleReservaSubmit(e) {
   showToast("✓ Reserva guardada");
 }
 
-function deleteReserva(weekKey, dayKey, rId, nombreCoche) {
+// ¿Pertenece r a la misma serie recurrente que ref?
+// Las reservas antiguas no tienen serieId: se reconocen por coche/persona/horario.
+function esMismaSerie(r, ref) {
+  if (!r || !ref || !r.recurrente) return false;
+  if (ref.serieId) return r.serieId === ref.serieId;
+  return !r.serieId &&
+    r.coche === ref.coche && r.persona === ref.persona &&
+    r.horaInicio === ref.horaInicio && r.horaFin === ref.horaFin;
+}
+
+// Busca la reserva y sus repeticiones desde la semana weekOffset hasta 52 semanas después
+function findSerieReservas(weekOffset, dayKey, ref) {
+  const reads = [];
+  for (let i = 0; i <= 52; i++) {
+    const weekKey = getISOWeekKey(getMondayOfWeek(weekOffset + i));
+    reads.push(db.ref(`coche/${weekKey}/${dayKey}/reservas`).once("value").then(snap => {
+      const out = [];
+      snap.forEach(child => {
+        if (esMismaSerie(child.val(), ref)) out.push({ weekKey, rId: child.key });
+      });
+      return out;
+    }));
+  }
+  return Promise.all(reads).then(res => res.flat());
+}
+
+let pendingDeleteReserva = null;
+
+function deleteReserva(weekKey, dayKey, rId, nombreCoche, reserva = null) {
   if (!db) return;
+  if (reserva?.recurrente) {
+    pendingDeleteReserva = { weekKey, dayKey, rId, nombreCoche, reserva, offset: cocheWeekOffset };
+    document.getElementById("scope-sheet-subtitle").textContent =
+      `${nombreCoche} · ${reserva.persona} · ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey} ${reserva.horaInicio}–${reserva.horaFin}`;
+    document.getElementById("scope-serie-btn").onclick = () => { closeScopeSheet(); deleteReservaSerie(pendingDeleteReserva); };
+    document.getElementById("scope-una-btn").onclick   = () => { closeScopeSheet(); removeReserva(weekKey, dayKey, rId, nombreCoche); };
+    document.getElementById("scope-sheet").classList.add("open");
+    document.getElementById("scope-sheet-overlay").classList.add("open");
+    return;
+  }
   if (!confirm(`¿Eliminar esta reserva del ${nombreCoche}?`)) return;
+  removeReserva(weekKey, dayKey, rId, nombreCoche);
+}
+
+function closeScopeSheet() {
+  document.getElementById("scope-sheet").classList.remove("open");
+  document.getElementById("scope-sheet-overlay").classList.remove("open");
+}
+
+function removeReserva(weekKey, dayKey, rId, nombreCoche) {
   db.ref(`coche/${weekKey}/${dayKey}/reservas/${rId}`).remove();
   logActivity("Coche", `ha eliminado su reserva del ${nombreCoche} el ${DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey}`);
   showToast("Reserva eliminada");
+}
+
+function deleteReservaSerie({ weekKey, dayKey, rId, nombreCoche, reserva, offset }) {
+  findSerieReservas(offset, dayKey, reserva).then(matches => {
+    if (!matches.some(m => m.weekKey === weekKey && m.rId === rId)) matches.push({ weekKey, rId });
+    const updates = {};
+    matches.forEach(m => { updates[`coche/${m.weekKey}/${dayKey}/reservas/${m.rId}`] = null; });
+    db.ref().update(updates).catch(err => {
+      console.error("[coche] borrar serie:", err);
+      showToast("⚠️ No se pudieron eliminar las reservas");
+    });
+    // Optimista: semana mostrada
+    const shownWeek = getISOWeekKey(getMondayOfWeek(cocheWeekOffset));
+    matches.filter(m => m.weekKey === shownWeek).forEach(m => {
+      if (cocheWeekData[dayKey]?.reservas) delete cocheWeekData[dayKey].reservas[m.rId];
+    });
+    renderCocheView();
+    const dia = (DIAS_FULL[DIAS_KEY.indexOf(dayKey)] || dayKey).toLowerCase();
+    logActivity("Coche", `ha eliminado su reserva recurrente del ${nombreCoche} los ${dia} 🔁 ${matches.length} semanas`);
+    showToast(`${matches.length} reservas eliminadas`);
+  }).catch(err => {
+    console.error("[coche] buscar serie:", err);
+    showToast("⚠️ No se pudieron cargar las reservas de la serie");
+  });
 }
 
 /* ═══════════════════════════════════════
@@ -1082,7 +1468,43 @@ function loadEventosWeek() {
   const monday = getMondayOfWeek(eventoWeekOffset);
   document.getElementById("eventos-week-label").textContent = formatWeekLabel(monday);
   renderEventosDayTabs(monday);
-  renderEventosDayContent(eventoSelectedDia, monday);
+  renderEventosView(monday);
+}
+
+// Pinta la vista activa (día o semana) de la semana mostrada
+function renderEventosView(monday) {
+  if (vistaSeccion.eventos === "semana") renderEventosWeekView(monday);
+  else renderEventosDayContent(eventoSelectedDia, monday);
+}
+
+function renderEventosWeekView(monday) {
+  const container = document.getElementById("eventos-day-content");
+  if (!container) return;
+  container.innerHTML = "";
+  const list = document.createElement("div");
+  list.className = "week-view";
+  const expanded = getEventosExpanded();
+  for (let i = 0; i < 7; i++) {
+    const dayDate = new Date(monday);
+    dayDate.setDate(monday.getDate() + i);
+    const dayISO = toLocalDateStr(dayDate);
+    const eventos = expanded
+      .filter(e => e.fecha === dayISO)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const body = eventos.length === 0
+      ? '<div class="week-view-line"><span class="week-view-text muted">—</span></div>'
+      : eventos.map(e => {
+          const personas = Object.keys(e.personas || {}).filter(p => e.personas[p]);
+          return `
+        <div class="week-view-line">
+          <span class="week-view-icon">📅</span>
+          <span class="week-view-text">${escapeHTML(e.nombre)}${e.recurrencia ? " 🔁" : ""}</span>
+          ${personas.length ? `<span class="week-view-meta">👥 ${personas.length}</span>` : ""}
+        </div>`;
+        }).join("");
+    weekViewDayCard(list, "eventos", monday, i, body);
+  }
+  container.appendChild(list);
 }
 
 function renderEventosDayTabs(monday) {
@@ -1193,7 +1615,7 @@ function renderEventos(eventos) {
   // Refrescar tabs (con dots actualizados) y contenido del día
   const monday = getMondayOfWeek(eventoWeekOffset);
   renderEventosDayTabs(monday);
-  renderEventosDayContent(eventoSelectedDia, monday);
+  renderEventosView(monday);
 
   // Lista de próximos eventos: solo los 30 días siguientes
   const container = document.getElementById("eventos-list");
@@ -1533,7 +1955,7 @@ function renderCompra() {
 }
 
 function compraItemRow(it) {
-  const row = document.createElement("label");
+  const row = document.createElement("div");
   row.className = "compra-item";
 
   const chk = document.createElement("input");
@@ -1545,6 +1967,8 @@ function compraItemRow(it) {
   const txt = document.createElement("span");
   txt.className = "compra-item-text" + (it.comprado ? " done" : "");
   txt.textContent = it.texto;
+  txt.title = "Toca para editar";
+  txt.addEventListener("click", () => convertCompraItemToInput(txt, it));
 
   const del = document.createElement("button");
   del.type = "button";
@@ -1557,6 +1981,42 @@ function compraItemRow(it) {
   row.appendChild(txt);
   row.appendChild(del);
   return row;
+}
+
+function convertCompraItemToInput(span, it) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "compra-edit-input";
+  input.value = it.texto;
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const save = () => {
+    if (done) return;
+    done = true;
+    const val = input.value.trim();
+    if (!val) deleteCompraItem(it.id);
+    else if (val !== it.texto) editCompraItem(it.id, val);
+    else input.replaceWith(span);
+  };
+  input.addEventListener("blur", save);
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { done = true; input.replaceWith(span); }
+  });
+}
+
+function editCompraItem(id, texto) {
+  if (!db) return;
+  db.ref(`compra/items/${id}/texto`).set(texto).catch(err => {
+    console.error("[compra] edición denegada:", err);
+    showToast("⚠️ No se pudo guardar — revisa las reglas de Firebase");
+  });
+  const it = compraItemsCache.find(x => x.id === id);
+  if (it) it.texto = texto;
+  renderCompra();
 }
 
 function addCompraItem(subKey, subNombre, texto) {

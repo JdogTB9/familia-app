@@ -450,7 +450,14 @@ ul { list-style: none; }
   font-size: 0.875rem;
   font-weight: 700;
   color: var(--color-text);
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
 }
+.week-nav-label::after { content: " 📅"; font-size: 0.8em; }
+.week-nav-label:hover { background: var(--color-surface-2); }
+.week-view-toggle { font-size: 1rem; }
+.week-view-toggle.active { background: var(--color-primary); color: #fff; }
 
 /* ═══════════════════════════════════════
    DAY TABS
@@ -1367,7 +1374,6 @@ ul { list-style: none; }
   gap: 0.65rem;
   padding: 0.5rem 0.15rem;
   border-bottom: 1px solid var(--color-border);
-  cursor: pointer;
 }
 .compra-item:last-child { border-bottom: none; }
 .compra-check {
@@ -1378,6 +1384,7 @@ ul { list-style: none; }
 }
 .compra-item-text {
   flex: 1;
+  cursor: text;
   font-size: 0.95rem;
   color: var(--color-text);
   word-break: break-word;
@@ -1405,3 +1412,101 @@ ul { list-style: none; }
   outline: none;
 }
 .compra-add-input:focus { border-color: var(--color-primary); border-style: solid; }
+
+/* ═══════════════════════════════════════
+   COMPRA — edición en línea
+═══════════════════════════════════════ */
+.compra-edit-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-surface);
+  outline: none;
+}
+
+/* ═══════════════════════════════════════
+   SELECTOR DE SEMANA (calendario)
+═══════════════════════════════════════ */
+.wp-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.wp-controls .form-select { flex: 1; min-width: 0; }
+.week-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.wp-head {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--color-text-muted);
+  padding: 0.3rem 0;
+}
+.wp-day {
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid transparent;
+  transition: background var(--transition);
+}
+.wp-day:hover { background: var(--color-surface-2); }
+.wp-day.other-month { color: var(--color-text-muted); opacity: 0.55; }
+.wp-day.in-week { background: var(--color-primary-light); color: #fff; opacity: 1; }
+.wp-day.today { border-color: var(--color-primary); font-weight: 800; }
+
+/* ═══════════════════════════════════════
+   VISTA SEMANAL
+═══════════════════════════════════════ */
+.week-view { display: flex; flex-direction: column; gap: 0.5rem; }
+.week-view-day {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition);
+}
+.week-view-day:hover { border-color: var(--color-primary-light); }
+.week-view-day.today { border-color: var(--color-primary); background: var(--color-surface-2); }
+.week-view-day-title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+  margin-bottom: 0.3rem;
+}
+.week-view-day-body { display: flex; flex-direction: column; gap: 0.2rem; }
+.week-view-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+.week-view-line .car-color-dot { flex-shrink: 0; }
+.week-view-icon { flex-shrink: 0; width: 1.3em; text-align: center; }
+.week-view-time { flex-shrink: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.week-view-text { flex: 1; min-width: 0; word-break: break-word; }
+.week-view-text.muted { color: var(--color-text-muted); }
+.week-view-meta { flex-shrink: 0; font-size: 0.8rem; color: var(--color-text-muted); }
+
+/* ═══════════════════════════════════════
+   RESERVAS RECURRENTES — alcance
+═══════════════════════════════════════ */
+.scope-options { display: flex; flex-direction: column; gap: 0.4rem; }
+.scope-actions { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
