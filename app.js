@@ -86,6 +86,7 @@ let editingReservaData   = null;   // datos originales (para localizar la serie)
 // Estado edición de evento
 let editingEventoId = null;
 let eventoPersonas  = {};
+let eventoTipo      = "evento"; // "evento" | "viaje"
 
 // Datos en memoria del coche (para solapamiento)
 let cocheWeekData = {};
@@ -215,6 +216,14 @@ function initUI() {
   document.getElementById("evento-modal-close").addEventListener("click", closeEventoModal);
   document.getElementById("evento-cancel-btn").addEventListener("click", closeEventoModal);
   document.getElementById("evento-form").addEventListener("submit", handleEventoSubmit);
+  document.querySelectorAll("#evento-tipo-row .tipo-btn").forEach(b => {
+    b.addEventListener("click", () => setEventoTipo(b.dataset.tipo));
+  });
+  // Al mover el inicio de un viaje, el fin nunca queda antes
+  document.getElementById("evento-fecha").addEventListener("change", (e) => {
+    const fin = document.getElementById("evento-fecha-fin");
+    if (!fin.value || fin.value < e.target.value) fin.value = e.target.value;
+  });
 
   // User grid
   const grid = document.getElementById("user-grid");
@@ -1410,10 +1419,37 @@ function generarInstancias(evento, horizonte = 730) {
   return instancias;
 }
 
+// Solo eventos puntuales (los viajes se tratan aparte con getViajesEnFecha)
 function getEventosExpanded(horizonte = 730) {
   const result = [];
-  allEventosCache.forEach(e => result.push(...generarInstancias(e, horizonte)));
+  allEventosCache.forEach(e => { if (!esViaje(e)) result.push(...generarInstancias(e, horizonte)); });
   return result;
+}
+
+/* ═══════════════════════════════════════
+   VIAJES (eventos con tipo "viaje": fecha = inicio, fechaFin = fin)
+═══════════════════════════════════════ */
+function esViaje(e) {
+  return !!e && e.tipo === "viaje";
+}
+
+function getViajesEnFecha(dayISO) {
+  return allEventosCache
+    .filter(v => esViaje(v) && v.fecha <= dayISO && dayISO <= (v.fechaFin || v.fecha))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+// Días naturales entre dos "YYYY-MM-DD" (desde → hasta)
+function diasEntre(desde, hasta) {
+  const a = new Date(desde + "T00:00:00"), b = new Date(hasta + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+}
+
+function formatRangoViaje(v) {
+  const ini = new Date(v.fecha + "T00:00:00");
+  const fin = new Date((v.fechaFin || v.fecha) + "T00:00:00");
+  const dias = diasEntre(v.fecha, v.fechaFin || v.fecha) + 1;
+  return `${formatDate(ini)} – ${formatDate(fin)} (${dias} ${dias === 1 ? "día" : "días"})`;
 }
 
 // Lectura puntual (once) para refrescar la vista sin depender del listener en tiempo real
@@ -1491,9 +1527,15 @@ function renderEventosWeekView(monday) {
     const eventos = expanded
       .filter(e => e.fecha === dayISO)
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
-    const body = eventos.length === 0
+    const viajesHTML = getViajesEnFecha(dayISO).map(v => `
+        <div class="week-view-line">
+          <span class="week-view-icon">✈️</span>
+          <span class="week-view-text">${escapeHTML(v.nombre)}</span>
+          <span class="week-view-meta">${formatDate(new Date(v.fecha + "T00:00:00"))} – ${formatDate(new Date(v.fechaFin + "T00:00:00"))}</span>
+        </div>`).join("");
+    const body = (eventos.length === 0 && !viajesHTML)
       ? '<div class="week-view-line"><span class="week-view-text muted">—</span></div>'
-      : eventos.map(e => {
+      : viajesHTML + eventos.map(e => {
           const personas = Object.keys(e.personas || {}).filter(p => e.personas[p]);
           return `
         <div class="week-view-line">
@@ -1516,6 +1558,7 @@ function renderEventosDayTabs(monday) {
     const dayKey  = DIAS_KEY[i];
     const dayISO  = toLocalDateStr(dayDate);
     const hasEvento = getEventosExpanded().some(e => e.fecha === dayISO);
+    const hasViaje  = getViajesEnFecha(dayISO).length > 0;
 
     const btn = document.createElement("button");
     btn.className = "day-tab" +
@@ -1524,10 +1567,12 @@ function renderEventosDayTabs(monday) {
     btn.setAttribute("role", "tab");
     btn.dataset.day = dayKey;
     btn.innerHTML = `
+      <span class="day-trip-bar${hasViaje ? "" : " empty"}"></span>
       <span class="day-abbr">${DIAS_ABBR[i]}</span>
       <span class="day-num">${dayDate.getDate()}</span>
       ${hasEvento ? '<span class="day-event-dot"></span>' : ''}
     `;
+    if (hasViaje) btn.title = getViajesEnFecha(dayISO).map(v => `✈️ ${v.nombre}`).join("\n");
     btn.addEventListener("click", () => {
       eventoSelectedDia = dayKey;
       document.querySelectorAll("#eventos-day-tabs .day-tab").forEach(t => t.classList.remove("active"));
@@ -1551,6 +1596,7 @@ function renderEventosDayContent(dayKey, monday) {
   const eventosDelDia = getEventosExpanded()
     .filter(e => e.fecha === dayISO)
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const viajesDelDia = getViajesEnFecha(dayISO);
 
   container.innerHTML = "";
   const card = document.createElement("div");
@@ -1568,45 +1614,74 @@ function renderEventosDayContent(dayKey, monday) {
 
   container.appendChild(card);
 
+  card.appendChild(eventosSubtitle("📅 Eventos"));
   if (eventosDelDia.length === 0) {
     const empty = document.createElement("div");
     empty.className = "activity-empty";
     empty.textContent = "Sin eventos este día";
     card.appendChild(empty);
   } else {
-    eventosDelDia.forEach((evento, i) => {
-      const colorIdx = i % EVENTO_COLORS.length;
-      const eCard = document.createElement("div");
-      eCard.className = "evento-card";
-      eCard.style.marginBottom = ".6rem";
-      eCard.innerHTML = `
-        <div class="evento-card-accent" style="background:${EVENTO_COLORS[colorIdx]}"></div>
-        <div class="evento-card-body">
-          <div class="evento-card-top">
-            <div>
-              <div class="evento-card-nombre">${escapeHTML(evento.nombre)}${evento.esVirtual ? ' <span class="recurrence-badge">🔁</span>' : ''}</div>
-              ${evento.descripcion ? `<div class="evento-card-desc">${escapeHTML(evento.descripcion)}</div>` : ""}
-            </div>
-            <div class="evento-card-actions">
-              <button class="evento-action-btn edit" data-id="${evento.id}" aria-label="Editar">✏️</button>
-              <button class="evento-action-btn delete" data-id="${evento.id}" aria-label="Eliminar">🗑️</button>
-            </div>
-          </div>
-          <div class="persona-chips evento-personas" id="dia-chips-${evento.id}"></div>
-        </div>
-      `;
-      card.appendChild(eCard);
+    eventosDelDia.forEach((evento, i) => card.appendChild(eventoCardEl(evento, { colorIdx: i })));
+  }
 
-      renderEventoPersonaChips(`dia-chips-${evento.id}`, evento.personas || {}, evento.id);
-
-      eCard.querySelector(`[data-id="${evento.id}"].edit`).addEventListener("click", () => openEventoModal(evento));
-      eCard.querySelector(`[data-id="${evento.id}"].delete`).addEventListener("click", () => deleteEvento(evento.id, evento.nombre));
-    });
+  if (viajesDelDia.length > 0) {
+    card.appendChild(eventosSubtitle("✈️ Viajes"));
+    viajesDelDia.forEach(v => card.appendChild(eventoCardEl(v, { diaISO: dayISO })));
   }
 
   document.getElementById("add-evento-dia-btn").addEventListener("click", () => {
     openEventoModal(dayISO);
   });
+}
+
+function eventosSubtitle(texto) {
+  const h = document.createElement("div");
+  h.className = "eventos-subtitle";
+  h.textContent = texto;
+  return h;
+}
+
+// Tarjeta de evento o viaje.
+// opts.colorIdx: color del acento (eventos) · opts.conFecha: mostrar fecha (lista de próximos)
+// opts.diaISO: en viajes, día concreto para mostrar "Día N de M"
+function eventoCardEl(evento, opts = {}) {
+  const viaje = esViaje(evento);
+  const card = document.createElement("div");
+  card.className = "evento-card" + (viaje ? " viaje" : "");
+  const accent = viaje ? "var(--color-info)" : EVENTO_COLORS[(opts.colorIdx || 0) % EVENTO_COLORS.length];
+  const recurrente = !viaje && (evento.esVirtual || (opts.conFecha && evento.recurrencia));
+
+  let fechaHTML = "";
+  if (viaje) {
+    const hoy = toLocalDateStr(new Date());
+    const enCurso = opts.conFecha && evento.fecha <= hoy && hoy <= evento.fechaFin;
+    const diaN = opts.diaISO ? ` · Día ${diasEntre(evento.fecha, opts.diaISO) + 1} de ${diasEntre(evento.fecha, evento.fechaFin) + 1}` : "";
+    fechaHTML = `<div class="evento-card-fecha">${formatRangoViaje(evento)}${diaN}${enCurso ? ' <span class="viaje-en-curso">En curso</span>' : ""}</div>`;
+  } else if (opts.conFecha) {
+    fechaHTML = `<div class="evento-card-fecha">${formatEventoFecha(evento.fecha)}</div>`;
+  }
+
+  card.innerHTML = `
+    <div class="evento-card-accent" style="background:${accent}"></div>
+    <div class="evento-card-body">
+      <div class="evento-card-top">
+        <div>
+          <div class="evento-card-nombre">${viaje ? "✈️ " : ""}${escapeHTML(evento.nombre)}${recurrente ? ' <span class="recurrence-badge">🔁</span>' : ''}</div>
+          ${fechaHTML}
+        </div>
+        <div class="evento-card-actions">
+          <button class="evento-action-btn edit" aria-label="Editar">✏️</button>
+          <button class="evento-action-btn delete" aria-label="Eliminar">🗑️</button>
+        </div>
+      </div>
+      ${evento.descripcion ? `<div class="evento-card-desc">${escapeHTML(evento.descripcion)}</div>` : ""}
+      <div class="persona-chips evento-personas"></div>
+    </div>
+  `;
+  renderEventoPersonaChips(card.querySelector(".evento-personas"), evento.personas || {}, evento.id);
+  card.querySelector(".edit").addEventListener("click", () => openEventoModal(evento));
+  card.querySelector(".delete").addEventListener("click", () => deleteEvento(evento.id, evento.nombre));
+  return card;
 }
 
 function renderEventos(eventos) {
@@ -1617,58 +1692,40 @@ function renderEventos(eventos) {
   renderEventosDayTabs(monday);
   renderEventosView(monday);
 
-  // Lista de próximos eventos: solo los 30 días siguientes
+  // Próximos: eventos de los 30 días siguientes y viajes que empiezan en los próximos 90 (o en curso)
   const container = document.getElementById("eventos-list");
   const today     = toLocalDateStr(new Date());
   const limit     = new Date(); limit.setDate(limit.getDate() + 30);
   const maxDate   = toLocalDateStr(limit);
-  const expanded  = getEventosExpanded(30);
-  const proximos  = expanded
+  const limitV    = new Date(); limitV.setDate(limitV.getDate() + 90);
+  const maxDateV  = toLocalDateStr(limitV);
+  const proximos  = getEventosExpanded(30)
     .filter(e => e.fecha >= today && e.fecha <= maxDate)
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const viajes = allEventosCache
+    .filter(v => esViaje(v) && v.fechaFin >= today && v.fecha <= maxDateV)
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
-  if (proximos.length === 0) {
+  if (proximos.length === 0 && viajes.length === 0) {
     container.innerHTML = '<div class="eventos-empty">No hay eventos en los próximos 30 días</div>';
     return;
   }
 
   container.innerHTML = "";
-  proximos.forEach((evento, i) => {
-    const colorIdx = i % EVENTO_COLORS.length;
-    const card = document.createElement("div");
-    card.className = "evento-card";
-    card.innerHTML = `
-      <div class="evento-card-accent" style="background:${EVENTO_COLORS[colorIdx]}"></div>
-      <div class="evento-card-body">
-        <div class="evento-card-top">
-          <div>
-            <div class="evento-card-nombre">${escapeHTML(evento.nombre)}${evento.esVirtual || evento.recurrencia ? ' <span class="recurrence-badge">🔁</span>' : ''}</div>
-            <div class="evento-card-fecha">${formatEventoFecha(evento.fecha)}</div>
-          </div>
-          <div class="evento-card-actions">
-            <button class="evento-action-btn edit" data-id="${evento.id}" aria-label="Editar">✏️</button>
-            <button class="evento-action-btn delete" data-id="${evento.id}" aria-label="Eliminar">🗑️</button>
-          </div>
-        </div>
-        ${evento.descripcion ? `<div class="evento-card-desc">${escapeHTML(evento.descripcion)}</div>` : ""}
-        <div class="persona-chips evento-personas" id="evento-chips-${evento.id}"></div>
-      </div>
-    `;
-    container.appendChild(card);
+  container.appendChild(eventosSubtitle("📅 Eventos"));
+  if (proximos.length === 0) {
+    container.insertAdjacentHTML("beforeend", '<div class="eventos-empty">No hay eventos en los próximos 30 días</div>');
+  }
+  proximos.forEach((evento, i) => container.appendChild(eventoCardEl(evento, { colorIdx: i, conFecha: true })));
 
-    renderEventoPersonaChips(`evento-chips-${evento.id}`, evento.personas || {}, evento.id);
-
-    card.querySelector(`[data-id="${evento.id}"].edit`).addEventListener("click", () => {
-      openEventoModal(evento);
-    });
-    card.querySelector(`[data-id="${evento.id}"].delete`).addEventListener("click", () => {
-      deleteEvento(evento.id, evento.nombre);
-    });
-  });
+  if (viajes.length > 0) {
+    container.appendChild(eventosSubtitle("✈️ Viajes"));
+    viajes.forEach(v => container.appendChild(eventoCardEl(v, { conFecha: true })));
+  }
 }
 
-function renderEventoPersonaChips(containerId, personasData, eventoId) {
-  const container = document.getElementById(containerId);
+function renderEventoPersonaChips(containerOrId, personasData, eventoId) {
+  const container = typeof containerOrId === "string" ? document.getElementById(containerOrId) : containerOrId;
   if (!container) return;
   container.innerHTML = "";
   FAMILIA.forEach(persona => {
@@ -1713,9 +1770,12 @@ function openEventoModal(eventoOrFecha = null) {
   editingEventoId = evento ? evento.id : null;
   eventoPersonas  = evento ? { ...(evento.personas || {}) } : {};
 
-  document.getElementById("evento-modal-title").textContent = evento ? "Editar evento" : "Añadir evento";
+  const fechaIni = evento?.fecha || fechaPre || toLocalDateStr(new Date());
+  document.getElementById("evento-modal-title").textContent = evento ? (esViaje(evento) ? "Editar viaje" : "Editar evento") : "Añadir evento";
   document.getElementById("evento-nombre").value     = evento?.nombre || "";
-  document.getElementById("evento-fecha").value      = evento?.fecha || fechaPre || toLocalDateStr(new Date());
+  document.getElementById("evento-fecha").value      = fechaIni;
+  document.getElementById("evento-fecha-fin").value  = evento?.fechaFin || fechaIni;
+  setEventoTipo(esViaje(evento) ? "viaje" : "evento");
   document.getElementById("evento-desc").value       = evento?.descripcion || "";
   document.getElementById("evento-recurrencia").value = evento?.recurrencia || "";
 
@@ -1740,6 +1800,17 @@ function openEventoModal(eventoOrFecha = null) {
   document.getElementById("evento-nombre").focus();
 }
 
+// Cambia el formulario entre evento puntual y viaje (inicio + fin, sin repetición)
+function setEventoTipo(tipo) {
+  eventoTipo = tipo;
+  const viaje = tipo === "viaje";
+  document.querySelectorAll("#evento-tipo-row .tipo-btn").forEach(b => b.classList.toggle("active", b.dataset.tipo === tipo));
+  document.getElementById("evento-fecha-label").textContent = viaje ? "Fecha de inicio" : "Fecha";
+  document.getElementById("evento-fecha-fin-group").classList.toggle("hidden", !viaje);
+  document.getElementById("evento-recurrencia-group").classList.toggle("hidden", viaje);
+  document.getElementById("evento-nombre").placeholder = viaje ? "Ej: Viaje a Asturias" : "Ej: Cumpleaños de Mamá";
+}
+
 function closeEventoModal() {
   document.getElementById("evento-modal-overlay").classList.remove("open");
   document.getElementById("evento-modal").classList.remove("open");
@@ -1758,14 +1829,25 @@ function handleEventoSubmit(e) {
     return;
   }
 
+  const viaje    = eventoTipo === "viaje";
+  const fechaFin = viaje ? document.getElementById("evento-fecha-fin").value : null;
+  if (viaje && (!fechaFin || fechaFin < fecha)) {
+    showToast("⚠️ La fecha de fin debe ser igual o posterior a la de inicio");
+    return;
+  }
+  const tipoTxt  = viaje ? "viaje" : "evento";
+  const rangoTxt = viaje ? `${formatFechaCorta(fecha)} – ${formatFechaCorta(fechaFin)}` : formatFechaCorta(fecha);
+
   // Limpiar nulls
   const personas = {};
   Object.entries(eventoPersonas).forEach(([k, v]) => { if (v) personas[k] = true; });
 
-  const recurrencia = document.getElementById("evento-recurrencia").value || null;
+  const recurrencia = viaje ? null : (document.getElementById("evento-recurrencia").value || null);
   const data = {
     nombre,
+    tipo: viaje ? "viaje" : null,
     fecha,
+    fechaFin,
     descripcion: desc || null,
     recurrencia,
     personas,
@@ -1777,8 +1859,8 @@ function handleEventoSubmit(e) {
     const idEditado = editingEventoId;
     db.ref(`eventos/${idEditado}`).update(data)
       .then(() => {
-        logActivity("Eventos", `ha modificado el evento "${nombre}"`);
-        showToast("✓ Evento actualizado");
+        logActivity("Eventos", `ha modificado el ${tipoTxt} "${nombre}"`);
+        showToast(viaje ? "✓ Viaje actualizado" : "✓ Evento actualizado");
         // Actualización optimista: reflejar el cambio en la caché y repintar
         allEventosCache = allEventosCache.map(e => e.id === idEditado ? { id: idEditado, ...data } : e);
         eventoWeekOffset = fechaToWeekOffset(fecha);
@@ -1793,8 +1875,8 @@ function handleEventoSubmit(e) {
     const nuevoRef = db.ref("eventos").push(data);
     nuevoRef
       .then(() => {
-        logActivity("Eventos", `ha añadido el evento "${nombre}" (${formatFechaCorta(fecha)})`);
-        showToast("✓ Evento añadido");
+        logActivity("Eventos", `ha añadido el ${tipoTxt} "${nombre}" (${rangoTxt})`);
+        showToast(viaje ? "✓ Viaje añadido" : "✓ Evento añadido");
         eventoWeekOffset = fechaToWeekOffset(fecha);
         eventoSelectedDia = fechaToDayKey(fecha);
         // Actualización optimista: meter el evento recién creado en la caché y repintar
@@ -1814,10 +1896,11 @@ function handleEventoSubmit(e) {
 
 function deleteEvento(eventoId, nombre) {
   if (!db) return;
-  if (!confirm(`¿Eliminar el evento "${nombre}"?`)) return;
+  const tipoTxt = esViaje(allEventosCache.find(e => e.id === eventoId)) ? "viaje" : "evento";
+  if (!confirm(`¿Eliminar el ${tipoTxt} "${nombre}"?`)) return;
   db.ref(`eventos/${eventoId}`).remove()
     .then(() => {
-      logActivity("Eventos", `ha eliminado el evento "${nombre}"`);
+      logActivity("Eventos", `ha eliminado el ${tipoTxt} "${nombre}"`);
       showToast("Evento eliminado");
       // Actualización optimista: quitar de la caché y repintar
       allEventosCache = allEventosCache.filter(e => e.id !== eventoId);

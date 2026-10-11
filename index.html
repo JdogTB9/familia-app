@@ -403,14 +403,27 @@
       <form id="evento-form" class="modal-form" novalidate>
         <input type="hidden" id="evento-id" />
 
+        <div class="form-group" id="evento-tipo-row">
+          <label class="form-label">Tipo</label>
+          <div class="tipo-toggle">
+            <button type="button" class="tipo-btn active" data-tipo="evento">📅 Evento</button>
+            <button type="button" class="tipo-btn" data-tipo="viaje">✈️ Viaje</button>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label" for="evento-nombre">Nombre del evento</label>
           <input type="text" id="evento-nombre" class="form-input" placeholder="Ej: Cumpleaños de Mamá" required />
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="evento-fecha">Fecha</label>
+          <label class="form-label" for="evento-fecha" id="evento-fecha-label">Fecha</label>
           <input type="date" id="evento-fecha" class="form-input" required />
+        </div>
+
+        <div class="form-group hidden" id="evento-fecha-fin-group">
+          <label class="form-label" for="evento-fecha-fin">Fecha de fin</label>
+          <input type="date" id="evento-fecha-fin" class="form-input" />
         </div>
 
         <div class="form-group">
@@ -418,7 +431,7 @@
           <textarea id="evento-desc" class="form-textarea" placeholder="Detalles del evento..." rows="2"></textarea>
         </div>
 
-        <div class="form-group">
+        <div class="form-group" id="evento-recurrencia-group">
           <label class="form-label" for="evento-recurrencia">Repetición</label>
           <select id="evento-recurrencia" class="form-select">
             <option value="">Sin repetición</option>
